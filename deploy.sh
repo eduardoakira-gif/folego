@@ -29,7 +29,7 @@ TMP=$(mktemp)
 for k in PLUGGY_CLIENT_ID PLUGGY_CLIENT_SECRET PLUGGY_CONNECTOR_IDS PLUGGY_ALLOWED_EMAILS PLUGGY_WEBHOOK_SECRET \
          WA_PHONE_NUMBER_ID WA_ACCESS_TOKEN WA_APP_SECRET WA_VERIFY_TOKEN WA_NOTIFY_TEMPLATE \
          ANTHROPIC_API_KEY AI_DAILY_LIMIT APP_ORIGINS CRON_SECRET; do
-  [ -n "${!k:-}" ] && echo "$k=${!k}" >> "$TMP"
+  if [ -n "${!k:-}" ]; then echo "$k=${!k}" >> "$TMP"; fi
 done
 $SB secrets set --env-file "$TMP"; rm -f "$TMP"
 

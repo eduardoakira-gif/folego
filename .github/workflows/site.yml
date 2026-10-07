@@ -16,7 +16,7 @@ concurrency: { group: pages, cancel-in-progress: true }
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    environment: { name: github-pages, url: "${{ steps.pages.outputs.page_url }}" }
+    environment: { name: github-pages, url: "${{ steps.deployment.outputs.page_url }}" }
     steps:
       - uses: actions/checkout@v4
       - name: Gerar config.js
@@ -42,3 +42,4 @@ jobs:
       - uses: actions/upload-pages-artifact@v3
         with: { path: web }
       - uses: actions/deploy-pages@v4
+        id: deployment

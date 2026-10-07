@@ -41,20 +41,20 @@ jobs:
           for k in PLUGGY_CLIENT_ID PLUGGY_CLIENT_SECRET PLUGGY_CONNECTOR_IDS PLUGGY_ALLOWED_EMAILS PLUGGY_WEBHOOK_SECRET \
                    WA_PHONE_NUMBER_ID WA_ACCESS_TOKEN WA_APP_SECRET WA_VERIFY_TOKEN WA_NOTIFY_TEMPLATE \
                    ANTHROPIC_API_KEY AI_DAILY_LIMIT APP_ORIGINS CRON_SECRET; do
-            [ -n "${!k}" ] && echo "$k=${!k}" >> "$f"
+            if [ -n "${!k}" ]; then echo "$k=${!k}" >> "$f"; fi
           done
-          [ -s "$f" ] && supabase secrets set --env-file "$f" --project-ref "$REF"
+          if [ -s "$f" ]; then supabase secrets set --env-file "$f" --project-ref "$REF"; else echo "Nenhum segredo extra definido ainda"; fi
           rm -f "$f"
       - name: Funções
         run: |
-                    for fn in pluggy import-statement pluggy-webhook whatsapp-webhook ingest-notification weekly-digest; do
+          for fn in pluggy import-statement pluggy-webhook whatsapp-webhook ingest-notification weekly-digest; do
             supabase functions deploy "$fn" --no-verify-jwt --project-ref "$REF"
           done
       - name: Resumo semanal (segunda 8h45 de Brasília)
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
-          [ -z "$CRON_SECRET" ] && { echo "CRON_SECRET não definido — pulando agendamento"; exit 0; }
+          if [ -z "$CRON_SECRET" ]; then echo "CRON_SECRET não definido — pulando agendamento"; exit 0; fi
           supabase db query --linked "
           create extension if not exists pg_cron with schema pg_catalog;
           create extension if not exists pg_net with schema extensions;
