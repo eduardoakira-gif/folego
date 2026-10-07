@@ -1,0 +1,22 @@
+project_id = "folego"
+
+# A autenticação é feita dentro de cada função (login do usuário, segredo, assinatura da Meta
+# ou token pessoal). A verificação automática fica desligada porque não funciona com as
+# chaves novas do Supabase (sb_publishable_/sb_secret_).
+[functions.pluggy-webhook]
+verify_jwt = false
+
+[functions.whatsapp-webhook]
+verify_jwt = false
+
+[functions.ingest-notification]
+verify_jwt = false
+
+[functions.weekly-digest]
+verify_jwt = false
+
+[functions.pluggy]
+verify_jwt = false
+
+[functions.import-statement]
+verify_jwt = false

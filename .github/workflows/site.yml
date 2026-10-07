@@ -1,0 +1,44 @@
+# Publica a pasta web/ no GitHub Pages a cada alteração.
+# config.js é gerado a partir das "Variables" do repositório (Settings → Secrets and variables → Actions → Variables):
+#   SUPABASE_URL, SUPABASE_ANON_KEY, WHATSAPP_NUMBER, PLUGGY_SANDBOX (true/false)
+# Se não existirem, usa o web/config.js do repositório.
+name: Publicar site
+on:
+  push:
+    branches: [main]
+    paths: ["web/**", ".github/workflows/site.yml"]
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency: { group: pages, cancel-in-progress: true }
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: { name: github-pages, url: "${{ steps.pages.outputs.page_url }}" }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Gerar config.js
+        if: ${{ vars.SUPABASE_URL != '' }}
+        env:
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
+          WHATSAPP_NUMBER: ${{ vars.WHATSAPP_NUMBER }}
+          PLUGGY_SANDBOX: ${{ vars.PLUGGY_SANDBOX || 'false' }}
+        run: |
+          cat > web/config.js <<JS
+          window.APP_CONFIG = {
+            SUPABASE_URL: "${SUPABASE_URL}",
+            SUPABASE_ANON_KEY: "${SUPABASE_ANON_KEY}",
+            WHATSAPP_NUMBER: "${WHATSAPP_NUMBER}",
+            PLUGGY_SANDBOX: ${PLUGGY_SANDBOX},
+          };
+          JS
+      - name: Versão do cache do app
+        run: sed -i "s/folego-v[0-9a-z]*/folego-${GITHUB_SHA::7}/" web/sw.js
+      - uses: actions/configure-pages@v5
+        id: pages
+      - uses: actions/upload-pages-artifact@v3
+        with: { path: web }
+      - uses: actions/deploy-pages@v4
