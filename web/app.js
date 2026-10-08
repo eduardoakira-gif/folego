@@ -754,6 +754,11 @@ function notifStatus() {
     <div class="notice ${ago > 2880 ? "warn" : "info"}" style="cursor:default;margin:10px 0"><span class="grow">
       Última notificação recebida <b>${agoTxt}</b> (${esc(last.app || "app")}).<br>
       <span class="faint">Últimos 7 dias: ${created} lançada(s) · ${dup} repetida(s) descartada(s) · ${ignored.length} aviso(s) com valor ignorado(s)</span></span></div>
+    <details ${location.hash.includes("avisos") ? "" : ""}><summary>Últimos avisos recebidos do celular</summary>
+      ${inbox.slice(0, 8).map((n) => `<div class="bank" style="grid-template-columns:1fr auto">
+        <div><b>${esc(n.app || "?")}</b> · ${esc(n.title || "(sem título)")}<br><span class="faint">${esc((n.body || "(sem texto)").slice(0, 120))} · ${new Date(n.received_at).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}</span></div>
+        <span class="status ${n.result === "created" ? "ok" : n.result === "ignored" ? "bad" : "wait"}">${{ created: "lançado", duplicate: "repetido", ignored: "ignorado", error: "erro" }[n.result] ?? n.result}</span></div>`).join("")}
+    </details>
     ${ignored.length ? `<details id="avisos" ${location.hash.includes("avisos") ? "open" : ""}><summary>Avisos com valor que não viraram lançamento</summary>
       <p class="faint">Códigos, propagandas e compras recusadas são ignorados de propósito. Se algum destes era um gasto de verdade, toque em <b>Lançar</b>.</p>
       ${ignored.slice(0, 10).map((n) => `<div class="bank" style="grid-template-columns:1fr auto">
