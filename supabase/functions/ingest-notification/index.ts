@@ -8,7 +8,7 @@ import { checkBudgetAlerts, ingestBatch } from "../_shared/store.ts";
 
 Deno.serve(handler(async (req) => {
   if (req.method !== "POST") throw new HttpError(405, "Use POST");
-  const body = await req.json().catch(() => ({}));
+  const body = parseBody(await req.text());
   const token = req.headers.get("x-ingest-token") ?? body.token;
   if (!token || String(token).length < 32) throw new HttpError(401, "Token ausente");
 
@@ -50,3 +50,26 @@ Deno.serve(handler(async (req) => {
   if (r.inserted && parsed.type === "expense") await checkBudgetAlerts(db, prof.id);
   return json(req, { ok: true, result, transaction: parsed });
 }));
+
+/**
+ * O MacroDroid/Atalhos montam o JSON colando o texto da notificação sem "escapar" aspas e
+ * quebras de linha — o que gera JSON inválido. Tentamos JSON normal e, se falhar,
+ * extraímos os campos pelo formato conhecido {"app":"…","title":"…","text":"…"}.
+ */
+function parseBody(raw: string): Record<string, any> {
+  try { return JSON.parse(raw); } catch { /* segue */ }
+  const field = (name: string, next: string | null) => {
+    const re = next
+      ? new RegExp(`"${name}"\\s*:\\s*"([\\s\\S]*?)"\\s*,\\s*"${next}"`)
+      : new RegExp(`"${name}"\\s*:\\s*"([\\s\\S]*)"\\s*}\\s*$`);
+    return raw.match(re)?.[1]?.replace(/\s+/g, " ").trim();
+  };
+  const out: Record<string, any> = {
+    app: field("app", "title"), title: field("title", "text"), text: field("text", null),
+  };
+  if (!out.text) {
+    // último recurso: formulário (app=...&title=...&text=...)
+    try { const f = new URLSearchParams(raw); for (const k of ["app", "title", "text", "token"]) if (f.get(k)) out[k] = f.get(k); } catch { /* ignora */ }
+  }
+  return out;
+}
