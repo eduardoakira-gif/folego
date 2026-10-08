@@ -84,7 +84,7 @@ Extraia os dados e responda SOMENTE com um JSON, sem texto antes ou depois:
  * Registra o comprovante. Se o mesmo valor já entrou (notificação, banco, extrato) perto da
  * data do comprovante, não duplica: só completa o nome e marca como empresa se for o caso.
  */
-export async function registerReceipt(db: SupabaseClient, userId: string, r: Receipt, opts: { reimbursable: boolean; caption: string }) {
+export async function registerReceipt(db: SupabaseClient, userId: string, r: Receipt, opts: { reimbursable: boolean; caption: string; source?: "whatsapp" | "telegram" }) {
   const when = r.date
     ? new Date(`${r.date}T${/^\d{2}:\d{2}$/.test(r.time ?? "") ? r.time : "12:00"}:00-03:00`).toISOString()
     : new Date().toISOString();
@@ -117,7 +117,7 @@ export async function registerReceipt(db: SupabaseClient, userId: string, r: Rec
   }
 
   const res = await ingestBatch(db, userId, [{
-    source: "whatsapp",
+    source: opts.source ?? "whatsapp",
     type: r.type,
     amount: r.amount,
     merchant: r.counterpart,

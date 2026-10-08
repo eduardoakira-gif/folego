@@ -2,11 +2,11 @@
 import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import { pickCategory, type Category, type Rule } from "./categorize.ts";
 import { normalizeMerchant, prettyMerchant } from "./parse.ts";
-import { sendWhatsApp } from "./whatsapp.ts";
+import { notifyUser } from "./notify.ts";
 import { brl } from "./supabase.ts";
 
 export type NewTx = {
-  source: "open_finance" | "notification" | "manual" | "whatsapp" | "import";
+  source: "open_finance" | "notification" | "manual" | "whatsapp" | "telegram" | "import";
   type: "income" | "expense" | "transfer";
   amount: number;
   description: string;
@@ -170,8 +170,8 @@ export async function ingestBatch(db: SupabaseClient, userId: string, items: New
 
 /** Avisa no WhatsApp quando uma categoria passa de 80% e de 100% do orçamento do ciclo. */
 export async function checkBudgetAlerts(db: SupabaseClient, userId: string) {
-  const { data: prof } = await db.from("profiles").select("whatsapp_phone,alerts_enabled").eq("id", userId).single();
-  if (!prof?.whatsapp_phone || !prof.alerts_enabled) return;
+  const { data: prof } = await db.from("profiles").select("whatsapp_phone,telegram_chat_id,alerts_enabled").eq("id", userId).single();
+  if ((!prof?.whatsapp_phone && !prof?.telegram_chat_id) || !prof.alerts_enabled) return;
   const { data: snap } = await db.rpc("financial_snapshot_for", { p_user: userId });
   if (!snap) return;
   const lines: string[] = [];
@@ -188,7 +188,7 @@ export async function checkBudgetAlerts(db: SupabaseClient, userId: string) {
   }
   if (lines.length) {
     lines.push(`\nDisponível até ${fmtDate(snap.cycle_end)}: ${brl(snap.available)} (${brl(snap.per_day)}/dia)`);
-    await sendWhatsApp(prof.whatsapp_phone, lines.join("\n"));
+    await notifyUser(db, userId, lines.join("\n"));
   }
 }
 

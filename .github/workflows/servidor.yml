@@ -52,7 +52,7 @@ jobs:
           rm -f "$f"
       - name: Funções
         run: |
-          for fn in pluggy import-statement pluggy-webhook whatsapp-webhook ingest-notification weekly-digest forma-ia forma-lembretes; do
+          for fn in pluggy import-statement pluggy-webhook whatsapp-webhook telegram-webhook ingest-notification weekly-digest forma-ia forma-lembretes; do
             supabase functions deploy "$fn" --no-verify-jwt --project-ref "$REF"
           done
       - name: Resumo semanal (segunda 8h45 de Brasília)
@@ -81,3 +81,22 @@ jobs:
               url := 'https://${REF}.supabase.co/functions/v1/forma-lembretes?acao=tick',
               headers := jsonb_build_object('Authorization', 'Bearer ${CRON_SECRET}'));
           \$\$);"
+      - name: Ligar o robô do Telegram ao servidor
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ]; then echo "TELEGRAM_BOT_TOKEN não definido — pulando"; exit 0; fi
+          SECRET=$(printf '%s' "$TELEGRAM_BOT_TOKEN:folego-webhook" | sha256sum | cut -d' ' -f1)
+          API="https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN"
+          curl -fsS "$API/setWebhook" -H "Content-Type: application/json" -d "{\"url\":\"https://${REF}.supabase.co/functions/v1/telegram-webhook\",\"secret_token\":\"$SECRET\",\"allowed_updates\":[\"message\",\"edited_message\"],\"drop_pending_updates\":false}" | grep -q '"ok":true' && echo "Webhook do Telegram configurado"
+          curl -fsS "$API/setMyCommands" -H "Content-Type: application/json" -d '{"commands":[
+            {"command":"resumo","description":"Quanto posso gastar até o salário"},
+            {"command":"hoje","description":"Gastos de hoje"},
+            {"command":"semana","description":"Gastos da semana"},
+            {"command":"mes","description":"Gastos do mês"},
+            {"command":"orcamento","description":"Situação de cada categoria"},
+            {"command":"contas","description":"Contas fixas, faturas e parcelas"},
+            {"command":"ultimos","description":"Últimos lançamentos"},
+            {"command":"reembolso","description":"Gastos da empresa a receber"},
+            {"command":"desfazer","description":"Apaga o último lançamento feito aqui"},
+            {"command":"ajuda","description":"Todos os comandos"}]}' > /dev/null && echo "Menu de comandos configurado"

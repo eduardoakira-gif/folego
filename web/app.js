@@ -412,7 +412,7 @@ function txRow(t) {
   const cls = t.type === "income" ? "in" : t.type === "transfer" ? "tr" : "";
   const sign = t.type === "income" ? "+" : t.type === "transfer" ? "" : "−";
   const acc = S.accounts.find((a) => a.id === t.account_id);
-  const origin = { open_finance: acc?.name || "Banco", notification: "Notificação", whatsapp: "WhatsApp", manual: "Manual", import: acc?.name || "Extrato" }[t.source];
+  const origin = { open_finance: acc?.name || "Banco", notification: "Notificação", whatsapp: "WhatsApp", telegram: "Telegram", manual: "Manual", import: acc?.name || "Extrato" }[t.source];
   return `<button class="tx" data-tx="${t.id}">
     <span class="ico" aria-hidden="true">${t.type === "transfer" ? "↔" : c?.icon ?? "❔"}</span>
     <span style="min-width:0"><div class="t1">${esc(pretty(t.merchant || t.description))}</div>
@@ -633,7 +633,7 @@ function reviewSheet() {
         <p class="faint">${i + 1} de ${queue.length}</p>
         <div class="rv-amt ${kind === "income" ? "pos" : ""}">${kind === "income" ? "+" : "−"}${brl(t.amount)}</div>
         <div class="rv-name">${esc(name)}</div>
-        <p class="faint">${fmtLong(t.occurred_at)} · ${esc({ open_finance: "Banco", notification: "Notificação", whatsapp: "WhatsApp", manual: "Manual", import: "Extrato" }[t.source] || "")}${original ? `<br>“${esc(String(original).slice(0, 120))}”` : ""}</p>
+        <p class="faint">${fmtLong(t.occurred_at)} · ${esc({ open_finance: "Banco", notification: "Notificação", whatsapp: "WhatsApp", telegram: "Telegram", manual: "Manual", import: "Extrato" }[t.source] || "")}${original ? `<br>“${esc(String(original).slice(0, 120))}”` : ""}</p>
         <div class="chips">${S.cats.filter((c) => c.kind === kind).map((c) => `<button class="chip" data-c="${c.id}"><span>${c.icon}</span>${esc(c.name)}</button>`).join("")}</div>
         <label class="check"><input type="checkbox" id="rvrule" checked><span>Usar sempre para <b>${esc(name.slice(0, 40))}</b></span></label>
         <div class="row" style="justify-content:space-between">
@@ -816,14 +816,27 @@ function viewConnections() {
   </section>
 
   <section class="panel">
+    <h2>Assistente no Telegram</h2>
+    ${p.telegram_chat_id
+      ? `<p>Conectado ✅. Mande <b>resumo</b>, <b>hoje</b>, <b>contas</b>, <i>gastei 30 no almoço</i> ou a foto de um comprovante.</p>
+         <label class="check"><input type="checkbox" class="alerts" ${p.alerts_enabled ? "checked" : ""}><span>Avisos de orçamento, contas vencendo e resumo semanal</span></label>
+         <div class="row">${CFG.TELEGRAM_BOT ? `<a class="btn" href="https://t.me/${esc(CFG.TELEGRAM_BOT)}" target="_blank" rel="noopener">Abrir conversa</a>` : ""}<button class="btn ghost" id="tgunlink">Desconectar</button></div>`
+      : CFG.TELEGRAM_BOT
+        ? `<p class="muted">Peça relatórios, lance gastos por mensagem e mande comprovantes por foto. Você precisa ter o app <b>Telegram</b> instalado.</p>
+           <button class="btn" id="tglink">Conectar Telegram</button>
+           <p class="faint" id="tghint"></p>`
+        : `<p class="muted">O assistente no Telegram ainda não foi configurado.</p>`}
+  </section>
+
+  ${CFG.WHATSAPP_NUMBER || p.whatsapp_phone ? `<section class="panel">
     <h2>WhatsApp</h2>
     ${p.whatsapp_phone
       ? `<p>Conectado ao número <b>+${esc(p.whatsapp_phone)}</b>. Mande <b>resumo</b>, <b>hoje</b>, <b>mês</b> ou <i>gastei 30 no almoço</i>.</p>
-         <label class="check"><input type="checkbox" id="alerts" ${p.alerts_enabled ? "checked" : ""}><span>Avisos de orçamento e resumo semanal</span></label>
+         <label class="check"><input type="checkbox" class="alerts" ${p.alerts_enabled ? "checked" : ""}><span>Avisos de orçamento e resumo semanal</span></label>
          <div class="row">${CFG.WHATSAPP_NUMBER ? `<a class="btn" href="https://wa.me/${CFG.WHATSAPP_NUMBER}?text=resumo" target="_blank" rel="noopener">Abrir conversa</a>` : ""}<button class="btn ghost" id="unlink">Desconectar</button></div>`
       : `<p class="muted">Peça relatórios e lance gastos por mensagem. Gere um código e envie para o assistente.</p>
          <div id="codebox"></div><button class="btn" id="gencode">Gerar código</button>`}
-  </section>
+  </section>` : ""}
 
   <section class="panel">
     <h2>Notificações do celular</h2>
@@ -880,7 +893,15 @@ function viewConnections() {
     pollLink();
   }));
   $("#unlink")?.addEventListener("click", (e) => busy(e.target, async () => { must(await sb.rpc("whatsapp_unlink")); await loadProfile(); viewConnections(); }));
-  $("#alerts")?.addEventListener("change", async (e) => { await sb.from("profiles").update({ alerts_enabled: e.target.checked }).eq("id", p.id); S.profile.alerts_enabled = e.target.checked; toast("Preferência salva."); });
+  document.querySelectorAll(".alerts").forEach((el) => el.addEventListener("change", async (e) => { await sb.from("profiles").update({ alerts_enabled: e.target.checked }).eq("id", p.id); S.profile.alerts_enabled = e.target.checked; toast("Preferência salva."); }));
+  $("#tglink")?.addEventListener("click", (e) => busy(e.target, async () => {
+    const code = must(await sb.rpc("whatsapp_link_code"));   // mesmo código de vínculo, válido por 15 min
+    const url = `https://t.me/${CFG.TELEGRAM_BOT}?start=${code}`;
+    $("#tghint").innerHTML = `Abrindo o Telegram… Toque em <b>Iniciar</b> (ou <b>Start</b>) na conversa. Se não abrir, <a href="${url}" target="_blank" rel="noopener">toque aqui</a> ou mande <b>${code}</b> para <b>@${esc(CFG.TELEGRAM_BOT)}</b>.`;
+    window.open(url, "_blank", "noopener");
+    pollLink();
+  }));
+  $("#tgunlink")?.addEventListener("click", (e) => busy(e.target, async () => { must(await sb.rpc("telegram_unlink")); await loadProfile(); viewConnections(); toast("Telegram desconectado."); }));
   $("#copytok").onclick = async () => { await navigator.clipboard.writeText(p.ingest_token); toast("Token copiado."); };
   $("#rotate").onclick = (e) => {
     if (!confirm("O token antigo para de funcionar. Você precisará atualizar o MacroDroid/Atalhos. Continuar?")) return;
@@ -947,7 +968,8 @@ function pollLink() {
   let n = 0;
   const t = setInterval(async () => {
     n++; await loadProfile();
-    if (S.profile.whatsapp_phone) { clearInterval(t); toast("WhatsApp conectado!"); if (S.view === "conexoes") viewConnections(); }
+    if (S.profile.whatsapp_phone && !pollLink._wa) { pollLink._wa = true; clearInterval(t); toast("WhatsApp conectado!"); if (S.view === "conexoes") viewConnections(); }
+    if (S.profile.telegram_chat_id && !pollLink._tg) { pollLink._tg = true; clearInterval(t); toast("Telegram conectado! ✅"); if (S.view === "conexoes") viewConnections(); }
     if (n > 90) clearInterval(t);
   }, 5000);
 }

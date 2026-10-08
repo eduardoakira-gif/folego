@@ -35,6 +35,13 @@ jobs:
             PLUGGY_SANDBOX: ${PLUGGY_SANDBOX},
           };
           JS
+      - name: Nome do robô do Telegram (para o botão "Conectar Telegram")
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ]; then exit 0; fi
+          U=$(curl -fsS "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/getMe" | python3 -c "import sys,json; print(json.load(sys.stdin)['result']['username'])")
+          echo "window.APP_CONFIG.TELEGRAM_BOT = \"$U\";" >> web/config.js
       - name: Versão do app (força o celular a buscar os arquivos novos)
         run: |
           V=${GITHUB_SHA::7}
