@@ -1,5 +1,7 @@
 # Fôlego — assistente financeiro (site + app + WhatsApp)
 
+> Neste repositório também vive o **Forma** (peso, medidas por foto, calorias, água e treino), em `web/forma/`. É um app separado com o mesmo login. Veja [docs/forma.md](docs/forma.md).
+
 Cada pessoa cria sua conta com e-mail e senha. Os gastos entram sozinhos (Open Finance, notificação do celular, extrato importado ou mensagem no WhatsApp), já categorizados. O orçamento é montado a partir da renda, e a tela principal responde uma pergunta: **quanto posso gastar por dia até o próximo salário**.
 
 ## Site, app e celular são a mesma coisa

@@ -20,3 +20,9 @@ verify_jwt = false
 
 [functions.import-statement]
 verify_jwt = false
+
+[functions.forma-ia]
+verify_jwt = false
+
+[functions.forma-lembretes]
+verify_jwt = false

@@ -36,18 +36,23 @@ jobs:
           AI_DAILY_LIMIT: ${{ secrets.AI_DAILY_LIMIT }}
           APP_ORIGINS: ${{ secrets.APP_ORIGINS }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
+          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+          VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT }}
+          FORMA_IA_LIMITE_DIA: ${{ secrets.FORMA_IA_LIMITE_DIA }}
         run: |
           f=$(mktemp)
           for k in PLUGGY_CLIENT_ID PLUGGY_CLIENT_SECRET PLUGGY_CONNECTOR_IDS PLUGGY_ALLOWED_EMAILS PLUGGY_WEBHOOK_SECRET \
                    WA_PHONE_NUMBER_ID WA_ACCESS_TOKEN WA_APP_SECRET WA_VERIFY_TOKEN WA_NOTIFY_TEMPLATE \
-                   ANTHROPIC_API_KEY AI_DAILY_LIMIT APP_ORIGINS CRON_SECRET; do
+                   ANTHROPIC_API_KEY AI_DAILY_LIMIT APP_ORIGINS CRON_SECRET \
+                   VAPID_PUBLIC_KEY VAPID_PRIVATE_KEY VAPID_SUBJECT FORMA_IA_LIMITE_DIA; do
             if [ -n "${!k}" ]; then echo "$k=${!k}" >> "$f"; fi
           done
           if [ -s "$f" ]; then supabase secrets set --env-file "$f" --project-ref "$REF"; else echo "Nenhum segredo extra definido ainda"; fi
           rm -f "$f"
       - name: Funções
         run: |
-          for fn in pluggy import-statement pluggy-webhook whatsapp-webhook ingest-notification weekly-digest; do
+          for fn in pluggy import-statement pluggy-webhook whatsapp-webhook ingest-notification weekly-digest forma-ia forma-lembretes; do
             supabase functions deploy "$fn" --no-verify-jwt --project-ref "$REF"
           done
       - name: Resumo semanal (segunda 8h45 de Brasília)
@@ -61,5 +66,18 @@ jobs:
           select cron.schedule('resumo-semanal', '45 11 * * 1', \$\$
             select net.http_post(
               url := 'https://${REF}.supabase.co/functions/v1/weekly-digest',
+              headers := jsonb_build_object('Authorization', 'Bearer ${CRON_SECRET}'));
+          \$\$);"
+      - name: Forma — lembretes de água, pesagem e treino (a cada 15 min)
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then echo "CRON_SECRET não definido — pulando agendamento"; exit 0; fi
+          supabase db query --linked "
+          create extension if not exists pg_cron with schema pg_catalog;
+          create extension if not exists pg_net with schema extensions;
+          select cron.schedule('forma-lembretes', '*/15 * * * *', \$\$
+            select net.http_post(
+              url := 'https://${REF}.supabase.co/functions/v1/forma-lembretes?acao=tick',
               headers := jsonb_build_object('Authorization', 'Bearer ${CRON_SECRET}'));
           \$\$);"
