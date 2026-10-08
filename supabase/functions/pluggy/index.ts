@@ -21,7 +21,10 @@ Deno.serve(handler(async (req) => {
   const allowed = (Deno.env.get("PLUGGY_ALLOWED_EMAILS") ?? "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
   const enabled = !!Deno.env.get("PLUGGY_CLIENT_ID") && (!allowed.length || allowed.includes(user.email));
   const connectorIds = (Deno.env.get("PLUGGY_CONNECTOR_IDS") ?? "").split(",").map((s) => parseInt(s)).filter((n) => n > 0);
-  if (action === "availability") return json(req, { enabled, meuPluggy: connectorIds.includes(200) });
+  if (action === "availability") {
+    const reason = !Deno.env.get("PLUGGY_CLIENT_ID") ? "no_keys" : enabled ? null : "email_not_allowed";
+    return json(req, { enabled, meuPluggy: connectorIds.includes(200), reason, email: user.email });
+  }
   if (!enabled && action !== "remove") {
     throw new HttpError(403, "Conexão automática com bancos não está disponível na sua conta. Use a importação de extrato ou as notificações do celular.");
   }

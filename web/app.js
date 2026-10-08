@@ -72,7 +72,7 @@ async function loadCore() {
   ]);
   S.reviewQueue = rq ?? []; S.bills = bills ?? [];
   // Open Finance liberado para este usuário? (no plano gratuito Meu Pluggy, só o titular)
-  if (!S.of) S.of = await call("pluggy", { action: "availability" }).catch(() => ({ enabled: false }));
+  S.of = await call("pluggy", { action: "availability" }).catch((e) => ({ enabled: false, reason: "error", error: e.message }));
 }
 const fmtWeekday = (iso) => d(iso).toLocaleDateString("pt-BR", { weekday: "long", day: "numeric", month: "short" }).replace("-feira", "").replace(".", "");
 const daysTo = (iso) => Math.round((d(iso) - d(todayISO())) / 864e5);
@@ -796,6 +796,8 @@ function viewConnections() {
 
   <section class="panel" style="margin-top:18px">
     <h2>Bancos e cartões</h2>
+    ${!S.of?.enabled && S.of?.reason === "email_not_allowed" ? `<div class="notice warn" style="cursor:default;margin-bottom:10px"><span class="grow">A conexão automática está liberada só para outro e-mail. Seu login é <b>${esc(S.of.email)}</b>: ele precisa estar escrito igual no secret <b>PLUGGY_ALLOWED_EMAILS</b> do GitHub.</span></div>` : ""}
+    ${!S.of?.enabled && S.of?.reason === "error" ? `<div class="notice warn" style="cursor:default;margin-bottom:10px"><span class="grow">Não consegui verificar a conexão automática: ${esc(S.of.error || "erro")}. Feche e abra o app; se continuar, mande um print.</span></div>` : ""}
     ${!S.of?.enabled ? `<p class="muted">A conexão automática com bancos não está ativa na sua conta. Você pode importar o extrato do seu banco (OFX ou CSV) e usar as notificações do celular para registrar os gastos na hora.</p>
       <button class="btn" id="goimp">Importar extrato</button>` : S.of.meuPluggy ? `<p class="muted">Conexão gratuita pelo <b>Meu Pluggy</b> (uso pessoal). Atualiza uma vez por dia; as notificações do celular cobrem o tempo real.</p>
       <ol class="steps"><li>Em <a href="https://meu.pluggy.ai" target="_blank" rel="noopener">meu.pluggy.ai</a>, crie sua conta e conecte seus bancos pelo Open Finance.</li>
