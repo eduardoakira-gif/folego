@@ -14,7 +14,7 @@ const SEGREDO = Deno.env.get('CRON_SECRET') ?? '';
 const VAPID_PUB = Deno.env.get('VAPID_PUBLIC_KEY') ?? '';
 const VAPID_PRIV = Deno.env.get('VAPID_PRIVATE_KEY') ?? '';
 const ORIGENS = (Deno.env.get('APP_ORIGINS') ?? '').split(',').map((s) => s.trim()).filter(Boolean);
-const APP_URL = Deno.env.get('FORMA_APP_URL') || (ORIGENS[0] && ORIGENS[0] !== '*' ? `${ORIGENS[0].replace(/\/$/, '')}/folego/forma/` : '/folego/forma/');
+const APP_URL = Deno.env.get('FORMA_APP_URL') || (ORIGENS[0] && ORIGENS[0] !== '*' ? `${ORIGENS[0].replace(/\/$/, '')}/forma/` : 'https://eduardoakira-gif.github.io/forma/');
 if (VAPID_PUB && VAPID_PRIV) webpush.setVapidDetails(Deno.env.get('VAPID_SUBJECT') ?? 'mailto:forma@example.com', VAPID_PUB, VAPID_PRIV);
 
 const json = (req: Request, b: unknown, s = 200) => jsonShared(req, b, s);

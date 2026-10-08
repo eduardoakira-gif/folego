@@ -1,7 +1,7 @@
 # Forma — peso, medidas, calorias, água e treino
 
 Módulo **Saúde e Corpo** do Life OS. App separado do Fôlego (ícone próprio no celular), mas com o mesmo login e o mesmo banco: fica em
-`https://eduardoakira-gif.github.io/folego/forma/` e funciona igual no computador.
+`https://eduardoakira-gif.github.io/forma/` e funciona igual no computador.
 
 ## O problema
 
@@ -47,30 +47,14 @@ Eventos na tabela `events` do Fôlego: `health.weight.*`, `health.body_scan.*`, 
 
 Segurança: RLS em tudo, fotos em bucket privado por usuário, chaves só no servidor, botões das notificações com token assinado que vale 20 h.
 
-## Arquivos
+## Onde está cada coisa
 
-```
-supabase/migrations/003_forma_saude.sql      banco, RLS, storage, eventos
-supabase/functions/forma-ia/                 foto/texto → calorias (Claude)
-supabase/functions/forma-lembretes/          água, pesagem, treino (Web Push)
-web/forma/                                   o app (sem build), usa o mesmo web/config.js do Fôlego
-tests/forma-calc.test.mjs                    testes dos cálculos e da medição (node tests/forma-calc.test.mjs)
-```
-
-A publicação usa os mesmos workflows do Fôlego: *Publicar site* sobe `web/forma/` junto, e *Publicar servidor* aplica a migration, publica `forma-ia` e `forma-lembretes` e agenda os lembretes a cada 15 min no próprio banco (pg_cron), como o resumo semanal.
-
-## Secrets novos (Settings → Secrets and variables → Actions → Secrets)
-
-| Nome | Valor |
+| Repositório | O que tem |
 |---|---|
-| `VAPID_PUBLIC_KEY` | chave pública das notificações |
-| `VAPID_PRIVATE_KEY` | chave privada das notificações |
-| `VAPID_SUBJECT` | `mailto:` + seu e-mail |
-| `FORMA_IA_LIMITE_DIA` | opcional, padrão 40 fotos de comida por dia |
+| **forma** (este) | o app: telas, cálculos, medição por foto, service worker. Publicado no GitHub Pages a cada alteração. |
+| **folego** | o servidor compartilhado: `supabase/migrations/003_forma_saude.sql`, funções `forma-ia` (foto → calorias) e `forma-lembretes` (notificações), agendamento a cada 15 min e os Secrets (`ANTHROPIC_API_KEY`, `VAPID_*`). |
 
-`ANTHROPIC_API_KEY`, `CRON_SECRET`, `APP_ORIGINS` e as Variables `SUPABASE_URL`/`SUPABASE_ANON_KEY` são as mesmas do Fôlego. Um novo par de chaves VAPID pode ser gerado em *Ajustes → Configuração do servidor* dentro do Forma.
-
-**Custo extra**: zero de infraestrutura. A IA da comida custa centavos por foto, com limite diário.
+Testes: `node tests/forma-calc.test.mjs`.
 
 ## Limites honestos
 

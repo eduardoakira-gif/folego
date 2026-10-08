@@ -2,25 +2,23 @@
 <html lang="pt-BR">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Forma</title>
-  <meta name="description" content="Peso, medidas, calorias, água e treino num lugar só.">
-  <meta name="theme-color" content="#E9EEEC" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#121A18" media="(prefers-color-scheme: dark)">
-  <link rel="manifest" href="manifest.webmanifest">
-  <link rel="icon" href="icon.svg" type="image/svg+xml">
-  <link rel="apple-touch-icon" href="icon-192.png">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-title" content="Forma">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,400..800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Forma mudou de endereço</title>
+  <style>body{font-family:system-ui,sans-serif;background:#E9EEEC;color:#1C2A27;display:grid;place-items:center;min-height:100vh;margin:0;padding:16px;text-align:center}a{color:inherit;font-weight:700}</style>
 </head>
 <body>
-  <div id="app" aria-live="polite"></div>
-  <div id="toast" role="status" aria-live="polite"></div>
-  <script src="../config.js"></script>
-  <script type="module" src="app.js"></script>
+  <p>O Forma agora é um app separado.<br><a id="ir" href="/forma/">Abrir o Forma</a></p>
+  <script>
+    // Remove o app antigo que ficava dentro do Fôlego e leva para o endereço novo.
+    (async () => {
+      try {
+        const regs = await navigator.serviceWorker?.getRegistrations?.() || [];
+        await Promise.all(regs.filter((r) => r.scope.includes('/folego/forma/')).map((r) => r.unregister()));
+        const ks = await caches.keys();
+        await Promise.all(ks.filter((k) => k.startsWith('forma-')).map((k) => caches.delete(k)));
+      } catch (e) {}
+      location.replace('/forma/' + location.hash);
+    })();
+  </script>
 </body>
 </html>
