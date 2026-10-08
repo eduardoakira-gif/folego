@@ -61,6 +61,9 @@ async function loadCore() {
     sb.from("accounts").select("*"),
   ]);
   S.snap = must(snap); S.cats = must(cats); S.conns = must(conns); S.accounts = must(accounts);
+  // últimas notificações recebidas do celular (para saber se o MacroDroid está funcionando)
+  const { data: inbox } = await sb.from("notification_inbox").select("id,app,title,body,result,received_at").order("received_at", { ascending: false }).limit(40);
+  S.inbox = inbox ?? [];
   // Open Finance liberado para este usuário? (no plano gratuito Meu Pluggy, só o titular)
   if (!S.of) S.of = await call("pluggy", { action: "availability" }).catch(() => ({ enabled: false }));
 }
@@ -248,6 +251,12 @@ function viewHome() {
   (s.categories || []).filter((c) => c.kind === "expense" && c.pct >= 100).forEach((c) => notices.push(["over", `${c.icon} <b>${esc(c.name)}</b> ${c.spent > c.budget ? "passou do" : "chegou ao limite do"} orçamento: ${brl0(c.spent)} de ${brl0(c.budget)}.`, "#orcamento"]));
   (s.categories || []).filter((c) => c.kind === "expense" && c.pct >= 80 && c.pct < 100).forEach((c) => notices.push(["warn", `${c.icon} <b>${esc(c.name)}</b> já usou ${c.pct}% do orçamento.`, "#orcamento"]));
   if (s.pending_review > 0) notices.push(["info", `<b>${s.pending_review}</b> lançamento(s) sem categoria ou aguardando o banco.`, "#lancamentos?revisar"]);
+  const lastNotif = S.inbox?.[0];
+  if (lastNotif && (Date.now() - Date.parse(lastNotif.received_at)) > 48 * 3600e3) {
+    notices.unshift(["warn", `📵 O celular não envia notificações desde <b>${new Date(lastNotif.received_at).toLocaleDateString("pt-BR", { day: "numeric", month: "short" })}</b>. Confira se o MacroDroid está ligado e sem economia de bateria.`, "#conexoes"]);
+  }
+  const ignoredRecent = (S.inbox || []).filter((n) => n.result === "ignored" && /R\$\s*\d/.test(`${n.title} ${n.body}`) && Date.now() - Date.parse(n.received_at) < 3 * 86400e3);
+  if (ignoredRecent.length) notices.push(["info", `<b>${ignoredRecent.length}</b> aviso(s) do banco com valor não viraram lançamento. Confira se algum era gasto.`, "#conexoes?avisos"]);
   if (s.reimbursable_open > 0) notices.push(["info", `<b>${brl(s.reimbursable_open)}</b> em gastos da empresa a reembolsar.`, "#lancamentos?reembolso"]);
 
   const pace = timePct;
@@ -462,9 +471,9 @@ function catOptions(kind, selected) {
   return S.cats.filter((c) => c.kind === kind).map((c) => `<option value="${c.id}" ${c.id === selected ? "selected" : ""}>${c.icon} ${esc(c.name)}</option>`).join("");
 }
 
-function editTx(t) {
+function editTx(t, preset = {}) {
   const isNew = !t;
-  t = t ?? { type: "expense", amount: "", description: "", occurred_at: todayISO(), category_id: null, reimbursable: false, note: "" };
+  t = t ?? { type: "expense", amount: "", description: "", occurred_at: todayISO(), category_id: null, reimbursable: false, note: "", ...preset };
   const fromBank = t.source === "open_finance";
   const merchantKey = (t.merchant || t.description || "").trim();
   sheet(isNew ? "Novo lançamento" : "Lançamento", `
@@ -659,6 +668,7 @@ function viewConnections() {
         <li>O iPhone não permite ler notificações de outros apps; para os demais gastos o Open Finance cobre.</li>
       </ol>
     </details>
+    ${notifStatus()}
     <p class="field"><span class="faint">URL</span><span class="token">${esc(fn)}</span></p>
     <p class="field"><span class="faint">Seu token (não compartilhe)</span><span class="token" id="tok">${esc(p.ingest_token)}</span></p>
     <div class="row"><button class="btn quiet" id="copytok">Copiar token</button><button class="btn ghost" id="testnot">Testar</button><button class="btn ghost" id="rotate">Gerar novo token</button></div>
@@ -700,6 +710,17 @@ function viewConnections() {
     if (!confirm("O token antigo para de funcionar. Você precisará atualizar o MacroDroid/Atalhos. Continuar?")) return;
     busy(e.target, async () => { must(await sb.rpc("rotate_ingest_token")); await loadProfile(); viewConnections(); toast("Novo token gerado."); });
   };
+  document.querySelectorAll("[data-launch]").forEach((b) => b.onclick = () => {
+    const n = S.inbox.find((x) => String(x.id) === b.dataset.launch);
+    const txt = `${n.title || ""} ${n.body || ""}`;
+    const m = txt.match(/R\$\s*([\d.]+,\d{2}|[\d.]+)/);
+    editTx(null, {
+      amount: m ? parseMoney(m[1]) : "",
+      description: n.title || n.app || "",
+      type: /receb|devolu|estorno/i.test(txt) ? "income" : "expense",
+      occurred_at: n.received_at, note: (n.body || "").slice(0, 200),
+    });
+  });
   $("#testnot").onclick = (e) => busy(e.target, async () => {
     const r = await fetch(fn, { method: "POST", headers: { "Content-Type": "application/json", "X-Ingest-Token": p.ingest_token },
       body: JSON.stringify({ app: "Teste", title: "Compra aprovada", text: "Compra de R$ 1,00 aprovada em TESTE FOLEGO" }) }).then((r) => r.json());
@@ -716,6 +737,29 @@ function viewConnections() {
       must(await sb.rpc("delete_my_account")); await sb.auth.signOut(); toast("Conta excluída.");
     });
   };
+}
+
+// Situação das notificações: quando chegou a última e quais avisos foram descartados
+function notifStatus() {
+  const inbox = S.inbox || [];
+  if (!inbox.length) return `<p class="faint">Nenhuma notificação recebida ainda. Depois de configurar, toque em <b>Testar</b>.</p>`;
+  const last = inbox[0];
+  const ago = Math.round((Date.now() - Date.parse(last.received_at)) / 60000);
+  const agoTxt = ago < 60 ? `há ${ago} min` : ago < 1440 ? `há ${Math.round(ago / 60)} h` : `há ${Math.round(ago / 1440)} dia(s)`;
+  const week = inbox.filter((n) => Date.now() - Date.parse(n.received_at) < 7 * 86400e3);
+  const created = week.filter((n) => n.result === "created").length;
+  const dup = week.filter((n) => n.result === "duplicate").length;
+  const ignored = week.filter((n) => n.result === "ignored" && /R\$\s*\d/.test(`${n.title} ${n.body}`));
+  return `
+    <div class="notice ${ago > 2880 ? "warn" : "info"}" style="cursor:default;margin:10px 0"><span class="grow">
+      Última notificação recebida <b>${agoTxt}</b> (${esc(last.app || "app")}).<br>
+      <span class="faint">Últimos 7 dias: ${created} lançada(s) · ${dup} repetida(s) descartada(s) · ${ignored.length} aviso(s) com valor ignorado(s)</span></span></div>
+    ${ignored.length ? `<details id="avisos" ${location.hash.includes("avisos") ? "open" : ""}><summary>Avisos com valor que não viraram lançamento</summary>
+      <p class="faint">Códigos, propagandas e compras recusadas são ignorados de propósito. Se algum destes era um gasto de verdade, toque em <b>Lançar</b>.</p>
+      ${ignored.slice(0, 10).map((n) => `<div class="bank" style="grid-template-columns:1fr auto">
+        <div><b>${esc(n.title || n.app || "Aviso")}</b><br><span class="faint">${esc((n.body || "").slice(0, 140))} · ${new Date(n.received_at).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}</span></div>
+        <button class="btn quiet" data-launch="${n.id}">Lançar</button></div>`).join("")}
+    </details>` : ""}`;
 }
 
 function pollLink() {

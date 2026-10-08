@@ -5,6 +5,7 @@ import { admin, brl, env } from "../_shared/supabase.ts";
 import { sendWhatsApp, verifyMetaSignature } from "../_shared/whatsapp.ts";
 import { parseChatEntry } from "../_shared/parse.ts";
 import { checkBudgetAlerts, ingestBatch } from "../_shared/store.ts";
+import { downloadWhatsAppMedia, readReceipt, registerReceipt } from "../_shared/receipt.ts";
 import { aiContext, budgetText, commitmentsText, lastText, periodText, recurringText, reimbursableText, summaryText } from "../_shared/reports.ts";
 
 const HELP = `👋 *Comandos*
@@ -18,6 +19,7 @@ const HELP = `👋 *Comandos*
 • *gastei 45 mercado* — lança na hora
 • *recebi 300 freela* — lança uma entrada
 • *desfazer* — apaga o último lançamento feito aqui
+• 📎 *mande o print/PDF de um comprovante* (Pix, boleto, nota) — eu leio e lanço sem duplicar. Escreva *empresa* na legenda se for reembolso
 Ou pergunte do seu jeito: _"quanto gastei com uber esse mês?"_`;
 
 const norm = (s: string) => s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
@@ -74,7 +76,35 @@ async function handleMessage(db: ReturnType<typeof admin>, msg: any) {
     return reply("Olá! Para usar o assistente, abra o app, vá em *Conexões → WhatsApp* e me envie o código de 6 dígitos que aparecer lá.");
   }
 
-  if (msg.type !== "text" && !text) return reply("Por enquanto eu entendo só mensagens de texto. Digite *ajuda* para ver os comandos.");
+  // ---------- comprovante (print ou PDF) ----------
+  if (msg.type === "image" || (msg.type === "document" && /pdf|image/i.test(msg.document?.mime_type ?? ""))) {
+    if (!Deno.env.get("ANTHROPIC_API_KEY")) {
+      return reply("Para eu ler comprovantes, a IA precisa estar ativada (ANTHROPIC_API_KEY). Por enquanto, lance digitando: *paguei 50 pix maria*");
+    }
+    const media = msg.image ?? msg.document;
+    const caption: string = (media?.caption ?? "").trim();
+    try {
+      const file = await downloadWhatsAppMedia(media.id);
+      const r = await readReceipt(file.bytes, file.mime, prof.name);
+      if (!r || !r.is_receipt || !r.amount) {
+        return reply("Não encontrei um comprovante nessa imagem. Mande o print do comprovante (Pix, transferência, boleto ou nota) com o valor aparecendo.");
+      }
+      const empresa = /\b(empresa|reembolso|reembolsavel|reembolsável|trabalho)\b/i.test(caption);
+      const out = await registerReceipt(db, prof.id, r, { reimbursable: empresa, caption });
+      const dia = new Date(out.day + "T12:00:00Z").toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", timeZone: "UTC" });
+      const tipo = r.type === "income" ? "💵 Entrada" : r.type === "transfer" ? "↔️ Transferência entre suas contas" : "✅ Gasto";
+      await reply(out.created
+        ? `${tipo} registrado pelo comprovante: ${r.counterpart ?? r.description ?? ""} — ${brl(r.amount)} (${dia})${empresa ? "\n🏢 Marcado como reembolso da empresa" : ""}\n_Errou? Responda *desfazer* ou ajuste no app._`
+        : `Esse ${brl(r.amount)} (${dia}) já estava registrado ✅ — não dupliquei.${empresa ? "\n🏢 Marquei como reembolso da empresa." : ""}`);
+      if (out.created && r.type === "expense") await checkBudgetAlerts(db, prof.id);
+    } catch (e) {
+      console.error("receipt", e);
+      await reply("Não consegui ler esse arquivo agora. Tente mandar de novo como *foto* (print da tela) ou lance digitando: *paguei 50 pix maria*");
+    }
+    return;
+  }
+
+  if (msg.type !== "text" && !text) return reply("Eu entendo mensagens de texto e comprovantes (foto ou PDF). Digite *ajuda* para ver os comandos.");
   const t = norm(text);
   const uid = prof.id;
 

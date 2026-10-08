@@ -80,4 +80,12 @@ assert(r.skipped === 1 && tables.transactions.length === n0 + 1, "Carteira + app
 // 12. Duas compras de mesmo valor com 3 horas de diferença em lugares diferentes continuam duas
 r = await ingestBatch(db, "u", [{ source: "notification", type: "expense", amount: 87.3, merchant: "Posto Shell", description: "Posto", occurred_at: "2026-10-08T02:00:00.000Z" }]);
 assert(r.inserted === 1, "compra igual em outro horário e outro lugar não é descartada");
+// 13. Pix entre suas contas avisado pelos dois bancos vira transferência (nem gasto, nem renda)
+await ingestBatch(db, "u", [{ source: "notification", type: "expense", amount: 700, merchant: "EDUARDO AKIRA NISHIKAWA", description: "x", occurred_at: "2026-10-08T12:00:00.000Z" }]);
+await ingestBatch(db, "u", [{ source: "notification", type: "income", amount: 700, merchant: "EDUARDO AKIRA N", description: "x", occurred_at: "2026-10-08T12:00:40.000Z" }]);
+const p700 = tables.transactions.filter((t) => Number(t.amount) === 700);
+assert(p700.length === 2 && p700.every((t) => t.type === "transfer"), "Pix entre suas contas (2 notificações) vira transferência");
+// 14. Pix para pessoa desconhecida fica sem categoria (vai para Revisar)
+r = await ingestBatch(db, "u", [{ source: "notification", type: "expense", amount: 61, merchant: "JOSE DA SILVA", description: "JOSE DA SILVA", occurred_at: "2026-10-08T15:00:00.000Z", providerCategory: "pix" }]);
+assert(tables.transactions.find((t) => t.id === r.ids[0]).category_id === null, "Pix para pessoa sem regra vai para Revisar");
 console.log("\nTodos os testes de deduplicação passaram.");

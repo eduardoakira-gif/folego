@@ -129,6 +129,23 @@ export async function ingestBatch(db: SupabaseClient, userId: string, items: New
         if (!dup.merchant && t.merchant) await db.from("transactions").update({ merchant: t.merchant }).eq("id", dup.id).eq("user_id", userId);
         skipped++; continue;
       }
+
+      // Pix entre suas próprias contas avisado pelos dois bancos: "Pix enviado para EDUARDO…"
+      // num app e "Pix recebido de EDUARDO…" no outro, mesmo valor, em poucos minutos.
+      // Vira transferência (não é gasto nem renda).
+      if (t.source === "notification" && (t.type === "expense" || t.type === "income") && t.merchant) {
+        const opposite = t.type === "expense" ? "income" : "expense";
+        const key = normalizeMerchant(t.merchant).slice(0, 8);
+        const pair = key.length >= 5 && recent.find((c) => c.source === "notification" && c.type === opposite &&
+          Number(c.amount) === t.amount && near(c.occurred_at, t.occurred_at, 15 / (24 * 60)) &&
+          normalizeMerchant(c.merchant).slice(0, 8) === key);
+        if (pair) {
+          await db.from("transactions").update({ type: "transfer", category_id: null, note: "Transferência entre suas contas (detectada pelas notificações)" })
+            .eq("id", pair.id).eq("user_id", userId);
+          pair.type = "transfer";
+          t.type = "transfer";
+        }
+      }
     }
 
     const { category_id, reimbursable } = categorize(t);

@@ -12,7 +12,14 @@ Deno.serve(async (req) => {
   let sent = 0;
   for (const u of users ?? []) {
     try {
-      const text = `☀️ Bom dia${u.name ? `, ${u.name.split(" ")[0]}` : ""}! Seu resumo da semana:\n\n${await summaryText(db, u.id)}`;
+      let text = `☀️ Bom dia${u.name ? `, ${u.name.split(" ")[0]}` : ""}! Seu resumo da semana:\n\n${await summaryText(db, u.id)}`;
+      // Celular parou de mandar notificações? Avisa para não perder lançamentos.
+      const { data: last } = await db.from("notification_inbox").select("received_at")
+        .eq("user_id", u.id).order("received_at", { ascending: false }).limit(1).maybeSingle();
+      if (last && Date.now() - Date.parse(last.received_at) > 3 * 86_400_000) {
+        const d = new Date(last.received_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", timeZone: "America/Sao_Paulo" });
+        text += `\n\n📵 Seu celular não envia notificações de gasto desde ${d}. Confira se o MacroDroid está ligado.`;
+      }
       if (await sendWhatsApp(u.whatsapp_phone!, text)) sent++;
     } catch (e) { console.error("digest", u.id, e); }
   }

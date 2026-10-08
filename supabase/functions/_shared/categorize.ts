@@ -77,6 +77,10 @@ export function pickCategory(
     }
   }
 
-  // 4. fallback
+  // 4. Pix/transferência para pessoa sem regra: fica "sem categoria" para você classificar
+  //    uma vez (vai para "Revisar"); a escolha vira regra e os próximos Pix para ela já entram certos.
+  if (opts.providerCategory && /\bpix\b|transfer/i.test(opts.providerCategory)) return { category_id: null, reimbursable: false };
+
+  // 5. fallback
   return { category_id: byName(opts.type === "income" ? "Outras entradas" : "Outros gastos"), reimbursable: false };
 }
