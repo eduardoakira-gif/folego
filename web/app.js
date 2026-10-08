@@ -676,7 +676,7 @@ function viewConnections() {
 
   <section class="panel">
     <h2>Conta</h2>
-    <p class="muted">${esc(S.session.user.email)}</p>
+    <p class="muted">${esc(S.session.user.email)}<br><span class="faint">Versão do app: ${esc(CFG.APP_VERSION || "local")}</span></p>
     <div class="row"><button class="btn ghost" id="logout">Sair</button><button class="btn danger" id="delacc">Excluir conta e dados</button></div>
   </section>
   `, { fab: false });
@@ -859,7 +859,16 @@ sb.auth.onAuthStateChange((event, session) => {
 });
 window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); window._installPrompt = e; });
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && S.profile?.onboarded) refresh(); });
-if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+if ("serviceWorker" in navigator) {
+  // quando uma versão nova do app é publicada, recarrega sozinho uma vez
+  const hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (hadController && !window._reloadedForUpdate) { window._reloadedForUpdate = true; location.reload(); }
+  });
+  navigator.serviceWorker.register("sw.js", { updateViaCache: "none" })
+    .then((reg) => { reg.update(); document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") reg.update(); }); })
+    .catch(() => {});
+}
 
 if (CFG.SUPABASE_URL.includes("SEU-PROJETO")) {
   $("#app").innerHTML = `<main class="auth"><div class="auth-card"><div class="brand"><span class="brand-mark">F</span>Fôlego</div><h1>Configure o app</h1><p class="lede">Preencha <b>web/config.js</b> com a URL e a anon key do seu projeto Supabase (veja o README).</p></div></main>`;
