@@ -164,3 +164,36 @@ export function parseWalletNotification(app: string, title: string, text: string
   const merchant = (title || "").replace(/^(pagamento|compra)( aprovad[ao])?( em| para)?\s*/i, "").trim().slice(0, 80) || null;
   return { type: refund ? "income" : "expense", amount, merchant, installment: null };
 }
+
+// Nomes conhecidos: como aparecem no extrato → como as pessoas falam
+const BRANDS: [RegExp, string][] = [
+  [/^(mercado ?livre|mercadolivre|mercadolibre)/, "Mercado Livre"], [/^(ifood|ifd)\b/, "iFood"],
+  [/^uber\b/, "Uber"], [/^(99 ?(pop|app|taxi|tecnologia)|99app)/, "99"], [/^amazon ?prime/, "Amazon Prime"],
+  [/^(amazon|amzn)/, "Amazon"], [/^netflix/, "Netflix"], [/^spotify/, "Spotify"], [/^(apple com|apple bill|itunes)/, "Apple"],
+  [/^shopee/, "Shopee"], [/^shein/, "Shein"], [/^aliexpress/, "AliExpress"], [/^rappi/, "Rappi"],
+  [/^starbucks/, "Starbucks"], [/^(mcdonald|mc donalds)/, "McDonald's"], [/^(burger king|bk brasil)/, "Burger King"],
+  [/^drogasil/, "Drogasil"], [/^(droga raia|raia\b)/, "Droga Raia"], [/^carrefour/, "Carrefour"], [/^assai/, "Assaí"],
+  [/^pao de acucar/, "Pão de Açúcar"], [/^smart ?fit/, "Smart Fit"], [/^kabum/, "KaBuM!"], [/^(magalu|magazine luiza)/, "Magalu"],
+  [/^disney/, "Disney+"], [/^(hbo|max com)/, "Max"], [/^youtube/, "YouTube"], [/^google one/, "Google One"],
+  [/^(chatgpt|openai)/, "ChatGPT"], [/^claude/, "Claude"], [/^steam/, "Steam"], [/^playstation|^psn/, "PlayStation"],
+];
+
+/** "MERCADOLIVRE.ME" → "Mercado Livre"; "PADARIA REAL LTDA" → "Padaria Real"; "UBER *TRIP" → "Uber". */
+export function prettyMerchant(raw: string | null | undefined): string | null {
+  if (!raw) return raw ?? null;
+  const original = raw.trim();
+  const norm = normalizeMerchant(original);
+  for (const [re, name] of BRANDS) if (re.test(norm)) return name;
+  let s = original
+    .replace(/^(pag\*|pg \*|mp \*|mercpago\*|ebanx\*|pay\*|ec \*|dl\*|pp\*|iz \*|sumup \*|stone\*)\s*/i, "")
+    .replace(/(\.com(\.br)?|\.me)\b/gi, "")
+    .replace(/\s+(ltda|s\/?a|eireli|me|epp|mei)\.?$/i, "")
+    .replace(/[\s.,*-]+$/, "")
+    .trim();
+  if (s && s === s.toUpperCase() && /[A-ZÀ-Ú]/.test(s) && !s.startsWith("@")) {
+    s = s.toLowerCase()
+      .replace(/(^|[\s\-/(])([a-zà-ú])/g, (_m, p, c) => p + c.toUpperCase())
+      .replace(/ (De|Da|Do|Dos|Das|E) /g, (w) => w.toLowerCase());
+  }
+  return (s || original).slice(0, 80);
+}

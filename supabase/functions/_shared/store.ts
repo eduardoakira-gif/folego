@@ -1,7 +1,7 @@
 // Gravação de transações: categorização, deduplicação entre fontes e alertas de orçamento.
 import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import { pickCategory, type Category, type Rule } from "./categorize.ts";
-import { normalizeMerchant } from "./parse.ts";
+import { normalizeMerchant, prettyMerchant } from "./parse.ts";
 import { sendWhatsApp } from "./whatsapp.ts";
 import { brl } from "./supabase.ts";
 
@@ -27,7 +27,7 @@ export async function loadCategorizer(db: SupabaseClient, userId: string) {
   ]);
   return (t: NewTx) =>
     pickCategory(
-      { type: t.type, text: `${t.merchant ?? ""} ${t.description}`, providerCategory: t.providerCategory },
+      { type: t.type, text: `${t.merchant ?? ""} ${prettyMerchant(t.merchant) ?? ""} ${t.description}`, providerCategory: t.providerCategory },
       (cats ?? []) as Category[],
       (rules ?? []) as Rule[],
     );
@@ -102,7 +102,7 @@ export async function ingestBatch(db: SupabaseClient, userId: string, items: New
         const patch: Record<string, unknown> = {
           external_id: t.external_id, account_id: t.account_id ?? null, source: t.source, type: t.type,
           status: t.status ?? "confirmed", occurred_at: t.occurred_at,
-          description: t.description, merchant: c.merchant ?? t.merchant ?? null,
+          description: t.description, merchant: c.merchant ?? prettyMerchant(t.merchant) ?? null,
         };
         if (t.type === "transfer") patch.category_id = null;
         else if (!c.category_locked) {
@@ -152,7 +152,7 @@ export async function ingestBatch(db: SupabaseClient, userId: string, items: New
     const id = crypto.randomUUID();
     inserts.push({
       id, user_id: userId, source: t.source, type: t.type, amount: t.amount,
-      description: t.description.slice(0, 200), merchant: t.merchant ?? null,
+      description: t.description.slice(0, 200), merchant: prettyMerchant(t.merchant) ?? null,
       occurred_at: t.occurred_at, external_id: t.external_id ?? null, account_id: t.account_id ?? null,
       status: t.status ?? (t.source === "notification" ? "pending" : "confirmed"),
       installment: t.installment ?? null, category_id, reimbursable, raw: t.raw ?? null,

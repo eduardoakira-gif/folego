@@ -8,21 +8,29 @@ import { normalizeMerchant } from "./parse.ts";
 export type Category = { id: string; name: string; kind: "income" | "expense" };
 export type Rule = { pattern: string; category_id: string; mark_reimbursable: boolean };
 
-const KEYWORDS: [RegExp, string][] = [
-  [/ifood|rappi|ze delivery|aiqfome|99food|mcdonald|burger king|bk |subway|habib|outback|starbucks|restaurante|lanchonete|padaria|pizzaria|sushi|cafe|bar /, "Restaurantes e delivery"],
-  [/carrefour|pao de acucar|extra |assai|atacad|dia |hirota|sonda|mambo|st marche|oba hortifruti|mercado|supermerc|hortifruti|sacolao|acougue|swift/, "Mercado"],
-  [/uber|99 ?(pop|app|taxi)|cabify|indrive|posto|shell|ipiranga|petrobras|br mania|combustivel|estacionamento|estapar|sem parar|conectcar|veloe|metro|cptm|sptrans|bilhete unico|zul |pedagio|ipva|detran|onibus|buser|clickbus/, "Transporte"],
-  [/netflix|spotify|disney|hbo|max |prime video|amazon prime|youtube|deezer|globoplay|apple com|icloud|google (one|storage)|chatgpt|openai|claude|anthropic|canva|adobe|microsoft|xbox game pass|playstation plus|psn|crunchyroll|paramount|smart fit|totalpass|gympass|wellhub/, "Assinaturas"],
-  [/aluguel|condominio|quinto andar|quintoandar|imobiliaria|iptu/, "Moradia"],
-  [/enel|eletropaulo|light |cemig|copel|sabesp|comgas|naturgy|vivo|claro|tim |oi |net |internet|energia|agua|gas /, "Contas e serviços"],
-  [/drogasil|droga raia|raia|pague menos|panvel|farmacia|drogaria|hospital|clinica|laborat|unimed|amil|sulamerica|bradesco saude|hapvida|dentista|odonto|psicolog/, "Saúde"],
-  [/udemy|alura|coursera|escola|faculdade|universidade|curso|livraria|saraiva|estante virtual|duolingo/, "Educação"],
-  [/steam|nuuvem|epic games|playstation|xbox|nintendo|cinema|cinemark|ingresso|sympla|eventim|ticket|show|teatro|parque/, "Lazer"],
-  [/amazon|mercado ?livre|mercadolivre|shopee|aliexpress|shein|magalu|magazine luiza|americanas|casas bahia|renner|riachuelo|c&a|cea |zara|centauro|netshoes|decathlon|kabum|fast shop|leroy|tok stok/, "Compras"],
-  [/barbearia|salao|cabeleireiro|estetica|manicure|boticario|natura|sephora|perfumaria/, "Cuidados pessoais"],
-  [/iof|juros|tarifa|anuidade|multa|encargo|mora /, "Taxas e juros"],
-  [/cdb|tesouro|corretora|xp invest|rico |clear |nuinvest|btg|investimento|previdencia/, "Reserva e investimentos"],
+// Palavras inteiras (ou prefixos, marcados com *), na ordem de prioridade.
+// A ordem importa: "amazon prime" (Assinaturas) antes de "amazon" (Compras);
+// "mercado livre" (Compras) antes de "mercado" (Mercado).
+const KEYWORD_LISTS: [string, string[]][] = [
+  ["Assinaturas", ["netflix*", "spotify*", "disney*", "hbo*", "prime video", "amazon prime*", "amazonprime*", "youtube*", "deezer*", "globoplay*", "apple com*", "apple bill", "icloud*", "google one", "google storage", "chatgpt*", "openai*", "claude ai", "anthropic*", "canva*", "adobe*", "microsoft*", "xbox game pass", "playstation plus", "psn*", "crunchyroll*", "paramount*", "smart fit", "smartfit*", "totalpass*", "gympass*", "wellhub*", "linkedin*", "dropbox*", "notion*", "max com"]],
+  ["Restaurantes e delivery", ["ifood*", "ifd", "rappi*", "ze delivery", "aiqfome*", "99food*", "mcdonald*", "mc donalds", "burger king", "bk brasil", "subway*", "habib*", "outback*", "starbucks*", "restaurante*", "restaurant*", "lanchonete*", "padaria*", "panificadora*", "pizzaria*", "pizza*", "sushi*", "cafe", "cafes", "cafeteria*", "bar", "boteco*", "churrascaria*", "hamburgueria*", "burger*", "acai*", "sorveteria*", "doceria*", "confeitaria*", "giraffas*", "spoleto*", "coco bambu", "madero*", "lanches", "esfiharia*"]],
+  ["Compras", ["mercado livre", "mercadolivre*", "mercadolibre*", "amazon*", "shopee*", "aliexpress*", "shein*", "temu*", "magalu*", "magazine luiza", "americanas*", "casas bahia", "renner*", "riachuelo*", "c a", "cea", "zara*", "centauro*", "netshoes*", "decathlon*", "kabum*", "fast shop", "fastshop*", "leroy*", "tok stok", "tokstok*", "dafiti*", "nike*", "adidas*", "havan*", "pernambucanas*"]],
+  ["Mercado", ["carrefour*", "pao de acucar", "extra", "assai*", "atacad*", "atacadao*", "dia", "hirota*", "sonda*", "mambo*", "st marche", "oba hortifruti", "mercado", "mercados", "supermercado*", "supermerc*", "mercadinho*", "minimercado*", "hortifruti*", "sacolao*", "acougue*", "swift*", "max atacadista", "makro*", "sams club", "tenda atacado", "oxxo*", "natural da terra"]],
+  ["Transporte", ["uber", "ubertrip*", "uberx", "99 pop", "99app*", "99 taxi", "99 tecnologia", "cabify*", "indrive*", "posto*", "shell*", "ipiranga*", "petrobras*", "br mania", "combustivel*", "estacionamento*", "estapar*", "sem parar", "semparar*", "conectcar*", "veloe*", "metro", "cptm*", "sptrans*", "bilhete unico", "zul", "pedagio*", "ipva", "detran*", "onibus", "buser*", "clickbus*", "localiza*", "movida*", "unidas*"]],
+  ["Moradia", ["aluguel*", "condominio*", "quinto andar", "quintoandar*", "imobiliaria*", "iptu"]],
+  ["Contas e serviços", ["enel*", "eletropaulo*", "light", "cemig*", "copel*", "sabesp*", "comgas*", "naturgy*", "vivo*", "claro*", "tim", "oi", "net", "internet*", "energia*", "conta de luz", "conta de agua", "agua e esgoto", "sky", "cpfl*", "celesc*", "coelba*", "celpe*", "sanepar*", "copasa*", "embasa*", "ultragaz*", "liquigas*"]],
+  ["Saúde", ["drogasil*", "droga raia", "raia*", "drogaria*", "farmacia*", "pague menos", "panvel*", "hospital*", "clinica*", "laborat*", "unimed*", "amil*", "sulamerica*", "bradesco saude", "hapvida*", "dentista*", "odonto*", "psicolog*", "dasa*", "fleury*", "lavoisier*"]],
+  ["Educação", ["udemy*", "alura*", "coursera*", "escola*", "faculdade*", "universidade*", "curso*", "livraria*", "saraiva*", "estante virtual", "duolingo*"]],
+  ["Lazer", ["steam*", "nuuvem*", "epic games", "playstation*", "xbox*", "nintendo*", "cinema*", "cinemark*", "kinoplex*", "ingresso*", "sympla*", "eventim*", "ticket*", "show", "teatro*", "parque*"]],
+  ["Cuidados pessoais", ["barbearia*", "barber*", "salao*", "cabeleireiro*", "estetica*", "manicure*", "boticario*", "natura", "sephora*", "perfumaria*"]],
+  ["Taxas e juros", ["iof", "juros", "tarifa*", "anuidade*", "multa", "encargo*", "mora"]],
+  ["Reserva e investimentos", ["cdb", "tesouro*", "corretora*", "xp invest*", "rico invest*", "nuinvest*", "btg*", "investimento*", "previdencia*"]],
 ];
+const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const KEYWORDS: [RegExp, string][] = KEYWORD_LISTS.map(([cat, words]) => [
+  new RegExp(`(?:^| )(?:${words.map((w) => w.endsWith("*") ? esc(w.slice(0, -1)) + "[a-z0-9]*" : esc(w)).join("|")})(?= |$)`),
+  cat,
+]);
 
 const INCOME_KEYWORDS: [RegExp, string][] = [
   [/salario|folha|pagto sal|proventos|remuneracao/, "Salário"],
@@ -55,7 +63,7 @@ export function pickCategory(
   rules: Rule[],
 ): { category_id: string | null; reimbursable: boolean } {
   if (opts.type === "transfer") return { category_id: null, reimbursable: false };
-  const norm = normalizeMerchant(opts.text) + " ";
+  const norm = (normalizeMerchant(opts.text) + " ").replace(/\b(mercado ?pago|pagseguro|pagbank|picpay|paypal|stone|cielo|getnet|sumup)\b/g, " ").replace(/\s+/g, " ");
   const byName = (n: string) => categories.find((c) => c.name === n && c.kind === opts.type)?.id ?? null;
 
   // 1. regras do usuário — a mais longa (mais específica) vence

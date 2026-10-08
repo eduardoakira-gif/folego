@@ -14,7 +14,7 @@ const HELP = `👋 *Comandos*
 • *orçamento* — situação de cada categoria
 • *últimos* — últimos lançamentos
 • *recorrentes* — assinaturas e contas fixas
-• *fatura* — faturas, parcelas e tudo que ainda vai sair
+• *contas* ou *fatura* — contas fixas, faturas, parcelas e tudo que ainda vai sair
 • *reembolso* — gastos da empresa a receber
 • *gastei 45 mercado* — lança na hora
 • *recebi 300 freela* — lança uma entrada
@@ -118,7 +118,7 @@ async function handleMessage(db: ReturnType<typeof admin>, msg: any) {
   if (/^(ultimos|extrato|lancamentos)$/.test(t)) return reply(await lastText(db, uid));
   if (/^(recorrentes|assinaturas|fixos)$/.test(t)) return reply(await recurringText(db, uid));
   if (/^(reembolso|reembolsos|empresa)$/.test(t)) return reply(await reimbursableText(db, uid));
-  if (/^(fatura|faturas|parcelas|compromissos|cartao|cartoes)$/.test(t)) return reply(await commitmentsText(db, uid));
+  if (/^(fatura|faturas|parcelas|compromissos|cartao|cartoes|contas|vencimentos)$/.test(t)) return reply(await commitmentsText(db, uid));
   if (/^(desfazer|apagar ultimo|cancelar)$/.test(t)) {
     const { data: last } = await db.from("transactions").select("id,description,amount")
       .eq("user_id", uid).eq("source", "whatsapp").is("deleted_at", null)

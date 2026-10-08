@@ -36,6 +36,8 @@ export async function summaryText(db: SupabaseClient, userId: string) {
     `*Onde mais gastou:*`,
     ...exp.map((c) => `${c.icon} ${c.name}: ${brl(c.spent)}${c.budget ? ` (${c.pct}%)` : ""}`),
   ];
+  const dueBills = ((s.bills ?? []) as any[]).filter((b) => !b.paid && daysUntil(b.due_date) <= 3);
+  if (dueBills.length) lines.push(``, ...dueBills.map((b) => `🧾 ${b.name}${b.amount ? ` (${brl(b.amount)})` : ""} ${daysUntil(b.due_date) < 0 ? "está atrasada" : `vence ${weekday(b.due_date)}`}`));
   const soon = (s.card_bills ?? []).filter((b: any) => daysUntil(b.due) <= 10);
   if (soon.length) lines.push(``, ...soon.map((b: any) => `💳 Fatura ${b.institution ?? b.account} de ${brl(b.amount)} vence ${weekday(b.due)}`));
   if (s.pending_review > 0) lines.push(``, `🔎 ${s.pending_review} lançamento(s) para revisar no app`);
@@ -135,6 +137,14 @@ export async function aiContext(db: SupabaseClient, userId: string) {
 export async function commitmentsText(db: SupabaseClient, userId: string) {
   const s = await snapshot(db, userId);
   const lines = [`📅 *O que ainda vai sair*`, ""];
+  const fixed = (s.bills ?? []) as any[];
+  if (fixed.length) {
+    lines.push("*Contas fixas do ciclo*");
+    fixed.forEach((b) => lines.push(b.paid
+      ? `✅ ${b.name}: paga${b.paid_amount ? ` (${brl(b.paid_amount)})` : ""}`
+      : `${daysUntil(b.due_date) < 0 ? "⚠️" : "🧾"} ${b.name}${b.amount ? `: ${brl(b.amount)}` : ""} — ${daysUntil(b.due_date) < 0 ? "venceu" : "vence"} ${weekday(b.due_date)}`));
+    lines.push("");
+  }
   const bills = s.card_bills ?? [];
   if (bills.length) {
     lines.push("*Faturas abertas*");
@@ -152,6 +162,6 @@ export async function commitmentsText(db: SupabaseClient, userId: string) {
     lines.push(`*Recorrentes*: ${brl(rec.reduce((a: number, r: any) => a + Number(r.avg_amount), 0))}/mês`);
     rec.slice(0, 6).forEach((r: any) => lines.push(`• ${r.merchant}: ${brl(r.avg_amount)} ~${fmtDate(r.next_expected)}`));
   }
-  if (lines.length === 2) return "Nada comprometido por enquanto: sem faturas abertas, parcelas ou contas recorrentes detectadas.";
+  if (lines.length === 2) return "Nada comprometido por enquanto: sem contas fixas, faturas abertas, parcelas ou contas recorrentes.";
   return lines.join("\n").trim();
 }

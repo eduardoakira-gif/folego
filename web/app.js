@@ -64,6 +64,13 @@ async function loadCore() {
   // últimas notificações recebidas do celular (para saber se o MacroDroid está funcionando)
   const { data: inbox } = await sb.from("notification_inbox").select("id,app,title,body,result,received_at").order("received_at", { ascending: false }).limit(40);
   S.inbox = inbox ?? [];
+  // lançamentos sem categoria (Pix para pessoas, lojas desconhecidas) e contas fixas
+  const [{ data: rq }, { data: bills }] = await Promise.all([
+    sb.from("transactions").select("*").is("deleted_at", null).is("category_id", null).neq("type", "transfer")
+      .order("occurred_at", { ascending: false }).limit(100),
+    sb.from("bills").select("*").order("due_day"),
+  ]);
+  S.reviewQueue = rq ?? []; S.bills = bills ?? [];
   // Open Finance liberado para este usuário? (no plano gratuito Meu Pluggy, só o titular)
   if (!S.of) S.of = await call("pluggy", { action: "availability" }).catch(() => ({ enabled: false }));
 }
@@ -95,6 +102,37 @@ async function loadTxs() {
     .order("occurred_at", { ascending: false }).limit(2000));
 }
 const catById = (id) => S.cats.find((c) => c.id === id);
+
+// Mesmo tratamento do servidor: "MERCADOLIVRE.ME" → "Mercado Livre", "PADARIA REAL LTDA" → "Padaria Real"
+const norm = (x) => String(x ?? "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "")
+  .replace(/^(pag\*|pg \*|mp \*|mercpago\*|ebanx\*|pay\*|ec \*|dl\*|pp\*|iz \*|sumup \*|stone\*)/, "").replace(/[^a-z0-9 ]/g, " ").replace(/\s{2,}/g, " ").trim();
+const BRANDS = [[/^(mercado ?livre|mercadolivre|mercadolibre)/, "Mercado Livre"], [/^(ifood|ifd)\b/, "iFood"], [/^uber\b/, "Uber"],
+  [/^(99 ?(pop|app|taxi|tecnologia)|99app)/, "99"], [/^amazon ?prime/, "Amazon Prime"], [/^(amazon|amzn)/, "Amazon"], [/^netflix/, "Netflix"],
+  [/^spotify/, "Spotify"], [/^(apple com|apple bill|itunes)/, "Apple"], [/^shopee/, "Shopee"], [/^shein/, "Shein"], [/^aliexpress/, "AliExpress"],
+  [/^rappi/, "Rappi"], [/^starbucks/, "Starbucks"], [/^(mcdonald|mc donalds)/, "McDonald's"], [/^(burger king|bk brasil)/, "Burger King"],
+  [/^drogasil/, "Drogasil"], [/^(droga raia|raia\b)/, "Droga Raia"], [/^carrefour/, "Carrefour"], [/^assai/, "Assaí"], [/^smart ?fit/, "Smart Fit"],
+  [/^kabum/, "KaBuM!"], [/^(magalu|magazine luiza)/, "Magalu"], [/^disney/, "Disney+"], [/^youtube/, "YouTube"], [/^(chatgpt|openai)/, "ChatGPT"]];
+function pretty(raw) {
+  if (!raw) return raw || "";
+  const n = norm(raw);
+  for (const [re, name] of BRANDS) if (re.test(n)) return name;
+  let x = String(raw).trim().replace(/^(pag\*|pg \*|mp \*|mercpago\*|ebanx\*|pay\*|ec \*|dl\*|pp\*|iz \*|sumup \*|stone\*)\s*/i, "")
+    .replace(/(\.com(\.br)?|\.me)\b/gi, "").replace(/\s+(ltda|s\/?a|eireli|me|epp|mei)\.?$/i, "").replace(/[\s.,*-]+$/, "").trim();
+  if (x && x === x.toUpperCase() && /[A-ZÀ-Ú]/.test(x) && !x.startsWith("@")) {
+    x = x.toLowerCase().replace(/(^|[\s\-/(])([a-zà-ú])/g, (_m, p, c) => p + c.toUpperCase()).replace(/ (De|Da|Do|Dos|Das|E) /g, (w) => w.toLowerCase());
+  }
+  return x || String(raw);
+}
+
+// Regra "sempre usar esta categoria para X" + aplica nos lançamentos parecidos ainda não ajustados
+async function saveRule(merchantKey, category_id, reimbursable = false) {
+  const pattern = norm(merchantKey).slice(0, 40);
+  if (pattern.length < 3 || !category_id) return;
+  must(await sb.from("category_rules").upsert({ user_id: S.session.user.id, pattern, category_id, mark_reimbursable: !!reimbursable }, { onConflict: "user_id,pattern" }));
+  const like = `%${pattern.replace(/[%_,()]/g, " ").trim()}%`;
+  await sb.from("transactions").update({ category_id }).or(`description.ilike.${like},merchant.ilike.${like}`)
+    .eq("category_locked", false).neq("type", "transfer").is("deleted_at", null);
+}
 
 // ------------------------------------------------------------------ autenticação
 function renderAuth(mode = "login") {
@@ -250,7 +288,15 @@ function viewHome() {
     : "<b>Importe o extrato do seu banco</b> (OFX ou CSV) para começar com seu histórico.", S.of?.enabled ? "#conexoes" : "#lancamentos?importar"]);
   (s.categories || []).filter((c) => c.kind === "expense" && c.pct >= 100).forEach((c) => notices.push(["over", `${c.icon} <b>${esc(c.name)}</b> ${c.spent > c.budget ? "passou do" : "chegou ao limite do"} orçamento: ${brl0(c.spent)} de ${brl0(c.budget)}.`, "#orcamento"]));
   (s.categories || []).filter((c) => c.kind === "expense" && c.pct >= 80 && c.pct < 100).forEach((c) => notices.push(["warn", `${c.icon} <b>${esc(c.name)}</b> já usou ${c.pct}% do orçamento.`, "#orcamento"]));
-  if (s.pending_review > 0) notices.push(["info", `<b>${s.pending_review}</b> lançamento(s) sem categoria ou aguardando o banco.`, "#lancamentos?revisar"]);
+  // contas fixas: atrasadas e vencendo em até 3 dias
+  const today = todayISO();
+  (s.bills || []).filter((b) => !b.paid).forEach((b) => {
+    const dd = daysTo(b.due_date);
+    if (dd < 0) notices.unshift(["over", `🧾 <b>${esc(b.name)}</b> venceu ${fmtDay(b.due_date)} e não encontrei o pagamento.${b.amount ? ` (${brl(b.amount)})` : ""}`, "#orcamento?contas"]);
+    else if (dd <= 3) notices.push(["warn", `🧾 <b>${esc(b.name)}</b>${b.amount ? ` de ${brl(b.amount)}` : ""} vence ${dd === 0 ? "hoje" : dd === 1 ? "amanhã" : fmtWeekday(b.due_date)}.`, "#orcamento?contas"]);
+  });
+  void today;
+  if (S.reviewQueue?.length) notices.push(["info", `<b>${S.reviewQueue.length}</b> lançamento(s) sem categoria. Toque para classificar um por um.`, "review"]);
   const lastNotif = S.inbox?.[0];
   if (lastNotif && (Date.now() - Date.parse(lastNotif.received_at)) > 48 * 3600e3) {
     notices.unshift(["warn", `📵 O celular não envia notificações desde <b>${new Date(lastNotif.received_at).toLocaleDateString("pt-BR", { day: "numeric", month: "short" })}</b>. Confira se o MacroDroid está ligado e sem economia de bateria.`, "#conexoes"]);
@@ -268,7 +314,7 @@ function viewHome() {
     <div class="breath-label">Pode gastar por dia até o salário de ${fmtWeekday(s.next_payday)}</div>
     <div class="breath-value"><span class="cur">R$</span>${reais}<small>,${cents}</small></div>
     <p class="breath-sub">${s.available >= 0
-      ? `Sobram <strong>${brl(s.available)}</strong> para os próximos <strong>${s.days_left} dias</strong>, já descontando ${s.committed_recurring > 0 ? `${brl(s.committed_recurring)} de contas recorrentes que ainda vão cair` : "o que você gastou"}.`
+      ? `Sobram <strong>${brl(s.available)}</strong> para os próximos <strong>${s.days_left} dias</strong>, já descontando ${s.committed_recurring > 0 ? `${brl(s.committed_recurring)} de contas que ainda vão vencer` : "o que você gastou"}.`
       : `Você está <strong>${brl(-s.available)}</strong> acima da renda neste ciclo. Faltam ${s.days_left} dias para o próximo salário.`}</p>
   </section>
 
@@ -292,6 +338,7 @@ function viewHome() {
     <div><dt>Saiu</dt><dd class="money">${brl0(s.expenses)}</dd></div>
     <div><dt>Livre</dt><dd class="money">${brl0(s.available)}</dd></div>
   </dl>
+  ${compareLine(s)}
 
   ${notices.length ? `<div class="notices">${notices.slice(0, 5).map(([k, html, go]) => `<button class="notice ${k}" data-go="${go}"><span class="grow">${html}</span><span aria-hidden="true">›</span></button>`).join("")}</div>` : ""}
 
@@ -306,27 +353,56 @@ function viewHome() {
       ${commitments(s)}
     </section>
   </div>`);
-  document.querySelectorAll("[data-go]").forEach((b) => b.onclick = () => { location.hash = b.dataset.go; });
+  document.querySelectorAll("[data-go]").forEach((b) => b.onclick = () => {
+    if (b.dataset.go === "review") return reviewSheet();
+    location.hash = b.dataset.go;
+  });
+  document.querySelectorAll("[data-mkbill]").forEach((b) => b.onclick = () => {
+    const r = (s.recurring || [])[Number(b.dataset.mkbill)];
+    billSheet(null, { name: pretty(r.merchant), amount: r.avg_amount, due_day: Number(String(r.next_expected).slice(8, 10)), match_text: norm(r.merchant).split(" ")[0] });
+  });
   bindTxRows();
+}
+// "Até hoje você gastou X — Y a menos que no mesmo ponto do ciclo passado"
+function compareLine(s) {
+  const c = s.compare;
+  if (!c || !(c.spent_prev > 0)) return "";
+  const diff = c.spent_now - c.spent_prev, pct = Math.round(Math.abs(diff) / c.spent_prev * 100);
+  if (Math.abs(diff) < 1) return `<p class="compare">No ${c.elapsed_days}º dia do ciclo você gastou o mesmo que no ciclo passado.</p>`;
+  const more = diff > 0;
+  return `<p class="compare ${more ? "up" : "down"}">${more ? "▲" : "▼"} No ${c.elapsed_days}º dia do ciclo você gastou <b>${brl0(c.spent_now)}</b>:
+    ${pct <= 300 ? `${pct}% ` : `${brl0(Math.abs(diff))} `}${more ? "a mais" : "a menos"} que no mesmo ponto do ciclo passado (${brl0(c.spent_prev)}).</p>`;
 }
 // Faturas abertas, parcelas futuras e contas recorrentes: o que já está comprometido
 function commitments(s) {
   const rows = [];
+  (s.bills || []).forEach((b) => {
+    const dd = daysTo(b.due_date);
+    const sub = b.paid ? `✅ paga ${b.paid_on ? fmtDay(b.paid_on) : ""}` : dd < 0 ? `⚠️ venceu ${fmtDay(b.due_date)}` : dd === 0 ? "vence hoje" : `vence ${fmtDay(b.due_date)}`;
+    rows.push(["🧾", esc(b.name), sub, b.paid ? (b.paid_amount ?? b.amount ?? 0) : (b.amount ?? 0), b.amount || b.paid ? "" : "valor varia"]);
+  });
   (s.card_bills || []).forEach((b) => rows.push(["💳", `Fatura ${esc(b.institution ?? b.account)}`, `vence ${fmtDay(b.due)}`, b.amount]));
   const inst = s.installments;
   if (inst?.items?.length) rows.push(["🧾", "Parcelas no cartão", `${inst.items.length} compra(s) · ${brl(inst.total_remaining)} até quitar tudo`, inst.next_3_months, "próx. 3 meses"]);
-  (s.recurring || []).slice(0, 6).forEach((r) => rows.push(["🔁", esc(r.merchant), `próximo por volta de ${fmtDay(r.next_expected)}`, r.avg_amount, "por mês"]));
+  const billKeys = (s.bills || []).map((b) => norm(b.name));
+  (s.recurring || []).slice(0, 6).forEach((r, i) => {
+    if (billKeys.some((k) => k && norm(r.merchant).includes(k.split(" ")[0]))) return; // já é conta fixa
+    rows.push(["🔁", `${esc(pretty(r.merchant))} <button class="linkbtn" data-mkbill="${i}" style="font-size:13px;padding:0 0 0 6px">virar conta fixa</button>`, `próximo por volta de ${fmtDay(r.next_expected)}`, r.avg_amount, "por mês"]);
+  });
   if (!rows.length) return "";
   return `<h2>O que ainda vai sair</h2><ul class="catlist">${rows.map(([ic, name, sub, val, unit]) => `
     <li class="catrow"><span class="ico" aria-hidden="true">${ic}</span><span class="name">${name}<br><span class="faint">${sub}</span></span>
     <span class="val money">${brl(val)}${unit ? `<br><small>${unit}</small>` : ""}</span></li>`).join("")}</ul>`;
 }
 function catRow(c, pace) {
+  const prev = S.snap?.compare?.prev_by_category?.[c.id];
+  const d = S.snap?.compare && c.kind === "expense" ? Number(c.spent) - Number(prev || 0) : 0;
+  const delta = S.snap?.compare && Math.abs(d) >= 20 ? `<small class="delta ${d > 0 ? "up" : "down"}">${d > 0 ? "+" : "−"}${brl0(Math.abs(d))} vs ciclo passado</small>` : "";
   const pct = c.budget ? Math.min(100, c.spent / c.budget * 100) : 0;
   const cls = !c.budget ? "" : c.pct >= 100 ? "over" : c.pct >= 80 ? "warn" : "";
   return `<li class="catrow">
     <span class="ico" aria-hidden="true">${c.icon}</span>
-    <span class="name">${esc(c.name)}</span>
+    <span class="name">${esc(c.name)}${delta ? `<br>${delta}` : ""}</span>
     <span class="val money">${brl0(c.spent)}${c.budget ? ` <small>de ${brl0(c.budget)}</small>` : ""}</span>
     ${c.budget ? `<div class="meter ${cls}" role="img" aria-label="${Math.round(c.pct)}% do orçamento"><i style="width:${pct}%"></i>${pace ? `<span class="pace" style="left:${pace}%"></span>` : ""}</div>` : ""}
   </li>`;
@@ -339,7 +415,7 @@ function txRow(t) {
   const origin = { open_finance: acc?.name || "Banco", notification: "Notificação", whatsapp: "WhatsApp", manual: "Manual", import: acc?.name || "Extrato" }[t.source];
   return `<button class="tx" data-tx="${t.id}">
     <span class="ico" aria-hidden="true">${t.type === "transfer" ? "↔" : c?.icon ?? "❔"}</span>
-    <span style="min-width:0"><div class="t1">${esc(t.merchant || t.description)}</div>
+    <span style="min-width:0"><div class="t1">${esc(pretty(t.merchant || t.description))}</div>
       <div class="t2">${t.type === "transfer" ? "Entre contas / fatura" : esc(c?.name ?? "Sem categoria")} · ${esc(origin)}${t.installment ? ` · ${esc(t.installment)}` : ""}
       ${t.status === "pending" ? `<span class="pill wait">aguardando banco</span>` : ""}${t.reimbursable ? `<span class="pill biz">${t.reimbursed_at ? "reembolsado" : "empresa"}</span>` : ""}</div></span>
     <span class="amt money ${cls}">${sign}${brl(t.amount)}</span>
@@ -388,6 +464,7 @@ function viewTxs() {
     </div>
   </div>
   <p class="faint">${rows.length} lançamentos · saídas ${brl(totOut)} · entradas ${brl(totIn)}</p>
+  ${f.type === "review" && S.reviewQueue?.length ? `<button class="btn" id="revone" style="margin:6px 0">Classificar um por um (${S.reviewQueue.length})</button>` : ""}
   ${rows.length ? [...groups.entries()].map(([k, list]) => `
     <section class="daygroup"><div class="dayhead"><span>${fmtLong(k)}</span><span class="money">${brl(list.filter((t) => t.type === "expense").reduce((a, t) => a + +t.amount, 0))}</span></div>
     ${list.map(txRow).join("")}</section>`).join("")
@@ -399,6 +476,7 @@ function viewTxs() {
   document.querySelectorAll("[data-f]").forEach((b) => b.onclick = () => { f.type = b.dataset.f; history.replaceState(null, "", "#lancamentos"); viewTxs(); });
   $("#csv").onclick = () => exportCSV(rows);
   $("#imp").onclick = importSheet;
+  $("#revone")?.addEventListener("click", reviewSheet);
   bindTxRows();
 }
 
@@ -523,12 +601,7 @@ function editTx(t, preset = {}) {
         if (!fromBank) { row.amount = amount; row.occurred_at = new Date(f.date + "T12:00:00").toISOString(); }
         if (isNew) must(await sb.from("transactions").insert({ ...row, user_id: S.session.user.id, source: "manual", status: "confirmed" }));
         else must(await sb.from("transactions").update(row).eq("id", t.id));
-        if (f.rule && row.category_id) {
-          const pattern = merchantKey.toLowerCase().replace(/[^a-z0-9à-ú ]/gi, " ").replace(/\s+/g, " ").trim().slice(0, 40);
-          must(await sb.from("category_rules").upsert({ user_id: S.session.user.id, pattern, category_id: row.category_id, mark_reimbursable: row.reimbursable }, { onConflict: "user_id,pattern" }));
-          // aplica a regra aos lançamentos parecidos que ainda não foram ajustados à mão
-          await sb.from("transactions").update({ category_id: row.category_id }).ilike("description", `%${pattern}%`).eq("category_locked", false).neq("type", "transfer");
-        }
+        if (f.rule && row.category_id) await saveRule(merchantKey, row.category_id, row.reimbursable);
         close(); toast(isNew ? "Lançamento adicionado." : "Alterações salvas."); await refresh();
       });
     };
@@ -538,6 +611,92 @@ function editTx(t, preset = {}) {
         must(await sb.from("transactions").update({ deleted_at: new Date().toISOString() }).eq("id", t.id));
         close(); toast("Lançamento excluído."); await refresh();
       });
+    });
+  });
+}
+
+// ------------------------------------------------------------------ REVISAR (um por um)
+function reviewSheet() {
+  const queue = [...(S.reviewQueue || [])];
+  let i = 0, done = 0;
+  if (!queue.length) return toast("Nada para classificar. 🙌");
+  sheet("Classificar lançamentos", `<div id="rv"></div>`, (close) => {
+    const show = () => {
+      if (i >= queue.length) {
+        close(); toast(done ? `${done} lançamento(s) classificado(s).` : "Revisão encerrada."); refresh(); return;
+      }
+      const t = queue[i];
+      const kind = t.type === "income" ? "income" : "expense";
+      const name = pretty(t.merchant || t.description);
+      const original = t.raw?.text || t.raw?.description || (t.description !== t.merchant ? t.description : "");
+      $("#rv").innerHTML = `
+        <p class="faint">${i + 1} de ${queue.length}</p>
+        <div class="rv-amt ${kind === "income" ? "pos" : ""}">${kind === "income" ? "+" : "−"}${brl(t.amount)}</div>
+        <div class="rv-name">${esc(name)}</div>
+        <p class="faint">${fmtLong(t.occurred_at)} · ${esc({ open_finance: "Banco", notification: "Notificação", whatsapp: "WhatsApp", manual: "Manual", import: "Extrato" }[t.source] || "")}${original ? `<br>“${esc(String(original).slice(0, 120))}”` : ""}</p>
+        <div class="chips">${S.cats.filter((c) => c.kind === kind).map((c) => `<button class="chip" data-c="${c.id}"><span>${c.icon}</span>${esc(c.name)}</button>`).join("")}</div>
+        <label class="check"><input type="checkbox" id="rvrule" checked><span>Usar sempre para <b>${esc(name.slice(0, 40))}</b></span></label>
+        <div class="row" style="justify-content:space-between">
+          <button class="btn ghost" id="rvskip">Pular</button>
+          <button class="btn quiet" id="rvtr">Entre minhas contas</button>
+        </div>`;
+      document.querySelectorAll("#rv [data-c]").forEach((b) => b.onclick = () => busy(b, async () => {
+        must(await sb.from("transactions").update({ category_id: b.dataset.c, category_locked: true }).eq("id", t.id));
+        if ($("#rvrule").checked) {
+          await saveRule(t.merchant || t.description, b.dataset.c);
+          // os próximos da fila com o mesmo nome já foram resolvidos pela regra
+          const k = norm(t.merchant || t.description);
+          for (let j = queue.length - 1; j > i; j--) if (norm(queue[j].merchant || queue[j].description) === k) { queue.splice(j, 1); done++; }
+        }
+        done++; i++; show();
+      }));
+      $("#rvskip").onclick = () => { i++; show(); };
+      $("#rvtr").onclick = (e) => busy(e.target, async () => {
+        must(await sb.from("transactions").update({ type: "transfer", category_id: null, category_locked: true }).eq("id", t.id));
+        done++; i++; show();
+      });
+    };
+    show();
+  });
+}
+
+// ------------------------------------------------------------------ CONTA FIXA
+function billSheet(b, preset = {}) {
+  const isNew = !b;
+  b = b ?? { name: "", amount: null, due_day: 10, category_id: null, match_text: "", active: true, ...preset };
+  sheet(isNew ? "Nova conta fixa" : "Conta fixa", `
+    <form id="bf">
+      <label class="field"><span>Nome</span><input class="input" name="name" value="${esc(b.name)}" placeholder="Ex.: Aluguel, Internet, Escola" required></label>
+      <div class="row">
+        <label class="field"><span>Valor (aproximado)</span><input class="input" name="amount" inputmode="decimal" value="${b.amount ? Number(b.amount).toLocaleString("pt-BR", { minimumFractionDigits: 2 }) : ""}" placeholder="vazio se varia"></label>
+        <label class="field" style="flex:0 1 130px"><span>Vence todo dia</span><input class="input" name="due_day" type="number" min="1" max="31" value="${b.due_day}" required></label>
+      </div>
+      <label class="field"><span>Categoria</span><select class="input" name="category_id"><option value="">—</option>${catOptions("expense", b.category_id)}</select></label>
+      <label class="field"><span>Como aparece no extrato/notificação</span><input class="input" name="match_text" value="${esc(b.match_text || "")}" placeholder="${esc(b.name || "ex.: vivo, enel, quinto andar")}">
+        <span class="faint">Uma palavra que sempre aparece no pagamento. Vazio = usa o nome.</span></label>
+      ${isNew ? "" : `<label class="check"><input type="checkbox" name="active" ${b.active ? "checked" : ""}><span>Ativa</span></label>`}
+      <div class="row" style="justify-content:space-between;margin-top:8px">
+        ${isNew ? "<span></span>" : `<button type="button" class="btn danger" id="bdel">Remover</button>`}
+        <button class="btn" type="submit">${isNew ? "Adicionar" : "Salvar"}</button>
+      </div>
+    </form>`, (close) => {
+    $("#bf").onsubmit = (e) => {
+      e.preventDefault();
+      const f = Object.fromEntries(new FormData(e.target));
+      busy(e.target.querySelector("[type=submit]"), async () => {
+        const day = Number(f.due_day);
+        if (!f.name.trim()) throw new Error("Dê um nome para a conta.");
+        if (!(day >= 1 && day <= 31)) throw new Error("O dia do vencimento vai de 1 a 31.");
+        const row = { name: f.name.trim(), amount: f.amount ? parseMoney(f.amount) : null, due_day: day,
+          category_id: f.category_id || null, match_text: norm(f.match_text) || null, active: isNew ? true : !!f.active };
+        if (isNew) must(await sb.from("bills").insert({ ...row, user_id: S.session.user.id }));
+        else must(await sb.from("bills").update(row).eq("id", b.id));
+        close(); toast(isNew ? "Conta fixa adicionada." : "Conta fixa salva."); await refresh();
+      });
+    };
+    $("#bdel")?.addEventListener("click", (e) => {
+      if (!confirm(`Remover a conta fixa “${b.name}”? Os lançamentos já feitos não mudam.`)) return;
+      busy(e.target, async () => { must(await sb.from("bills").delete().eq("id", b.id)); close(); toast("Conta fixa removida."); await refresh(); });
     });
   });
 }
@@ -566,12 +725,27 @@ function viewBudget() {
       <span><span class="name">${esc(c.name)}</span><br><span class="faint">gasto no ciclo ${brl0(spent.get(c.id) || 0)}</span></span>
       <input class="input money" aria-label="Orçamento de ${esc(c.name)}" data-bud="${c.id}" inputmode="decimal" placeholder="sem limite" value="${c.monthly_budget != null ? Number(c.monthly_budget).toLocaleString("pt-BR", { minimumFractionDigits: 2 }) : ""}">
     </li>`).join("")}</ul>
+  <h2 id="contas">Contas fixas</h2>
+  <p class="muted" style="max-width:60ch">Aluguel, internet, escola, academia… O app avisa antes do vencimento, reconhece sozinho quando você paga e já desconta do que você pode gastar.</p>
+  ${S.bills?.length ? `<ul class="catlist">${S.bills.map((b) => {
+    const st = (s?.bills || []).find((x) => x.bill_id === b.id);
+    const status = !b.active ? "pausada" : st ? (st.paid ? "✅ paga neste ciclo" : daysTo(st.due_date) < 0 ? "⚠️ atrasada" : `vence ${fmtDay(st.due_date)}`) : "";
+    return `<li class="catrow" style="grid-template-columns:28px 1fr auto">
+      <span class="ico">🧾</span>
+      <span><span class="name">${esc(b.name)}</span><br><span class="faint">todo dia ${b.due_day}${status ? ` · ${status}` : ""}</span></span>
+      <span class="val money">${b.amount ? brl(b.amount) : "<small>valor varia</small>"} <button class="linkbtn" data-bill="${b.id}">editar</button></span></li>`;
+  }).join("")}</ul>` : `<p class="faint">Nenhuma conta fixa ainda. Na tela inicial, contas que se repetem têm o atalho “virar conta fixa”.</p>`}
+  <div class="row" style="margin:10px 0 0"><button class="btn ghost" id="addbill">Adicionar conta fixa</button></div>
+
   <h2>Categorias de entrada</h2>
   <p class="muted">${S.cats.filter((c) => c.kind === "income").map((c) => `${c.icon} ${esc(c.name)}`).join(" · ")}</p>
   <div class="row" style="margin-top:18px"><button class="btn ghost" id="addcat">Nova categoria</button></div>
   `, { fab: false });
 
   bindPayday($("#incf"));
+  $("#addbill").onclick = () => billSheet(null);
+  document.querySelectorAll("[data-bill]").forEach((b) => b.onclick = () => billSheet(S.bills.find((x) => x.id === b.dataset.bill)));
+  if (location.hash.includes("contas")) setTimeout(() => $("#contas")?.scrollIntoView({ behavior: "smooth" }), 50);
   $("#incf").onsubmit = (e) => {
     e.preventDefault();
     const f = Object.fromEntries(new FormData(e.target));

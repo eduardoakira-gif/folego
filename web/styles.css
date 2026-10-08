@@ -275,3 +275,19 @@ fieldset.payday legend { font-size: 14px; font-weight: 600; color: var(--ink-2);
 .payday-row .input { width: 76px; text-align: center; font-weight: 700; }
 .payday-row span:empty { display: none; }
 #incf.panel { box-shadow: none; border: 1px solid var(--rule); }
+
+/* comparação com o ciclo anterior */
+.compare { margin: 12px 0 0; font-size: 14px; color: var(--ink-2); }
+.compare.up b, .delta.up { color: var(--over); }
+.compare.down b, .delta.down { color: var(--ok); }
+.delta { font-size: 12px; font-weight: 600; }
+
+/* revisar um por um */
+.rv-amt { font-size: 40px; font-weight: 900; letter-spacing: -.03em; line-height: 1.1; }
+.rv-amt.pos { color: var(--income); }
+.rv-name { font-size: 20px; font-weight: 700; margin: 2px 0 4px; }
+.chips { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin: 14px 0; }
+.chip { display: flex; gap: 8px; align-items: center; text-align: left; padding: 12px; min-height: 48px; border-radius: 12px;
+  border: 1px solid var(--rule); background: var(--surface); font-weight: 600; font-size: 14px; cursor: pointer; }
+.chip span { font-size: 18px; }
+.chip:active, .chip:focus-visible { border-color: var(--accent); }
