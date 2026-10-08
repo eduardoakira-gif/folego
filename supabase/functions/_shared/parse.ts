@@ -120,3 +120,18 @@ export function normalizeMerchant(s: string | null | undefined): string {
     .replace(/\s{2,}/g, " ")
     .trim();
 }
+
+/**
+ * Carteira do Google / Google Pay / Samsung Pay: o título é a loja e o texto traz
+ * o valor e o cartão, ex.: título "Padaria Real", texto "R$ 45,90 com Santander Visa •••• 1234".
+ */
+export function parseWalletNotification(app: string, title: string, text: string): ParsedTx | null {
+  if (!/wallet|carteira|google pay|gpay|samsung pay|samsung wallet/i.test(app)) return null;
+  const full = `${title} ${text}`;
+  if (/recusad|negad|n[aã]o autorizad|falhou|cancelad/i.test(full)) return null;
+  const amount = parseBRL(text) ?? parseBRL(full);
+  if (!amount) return null;
+  const refund = /reembolso|estorno|devolu/i.test(full);
+  const merchant = (title || "").replace(/^(pagamento|compra)( aprovad[ao])?( em| para)?\s*/i, "").trim().slice(0, 80) || null;
+  return { type: refund ? "income" : "expense", amount, merchant, installment: null };
+}

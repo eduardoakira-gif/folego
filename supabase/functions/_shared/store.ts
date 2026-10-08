@@ -117,10 +117,18 @@ export async function ingestBatch(db: SupabaseClient, userId: string, items: New
       // Notificação/manual: se já existe a mesma movimentação nas últimas 36h, ignora
       const sameMerchant = (a: string | null) =>
         !a || !t.merchant || normalizeMerchant(a).slice(0, 5) === normalizeMerchant(t.merchant).slice(0, 5);
+      // Mesma compra avisada por dois apps (ex.: Carteira do Google + app do banco): mesmo valor
+      // em até 15 minutos é a mesma movimentação, mesmo que os nomes do estabelecimento difiram.
+      const MIN15 = 15 / (24 * 60);
       const dup = t.source === "notification" && recent.find((c) =>
-        c.type === t.type && Number(c.amount) === t.amount && near(c.occurred_at, t.occurred_at, 1.5) && sameMerchant(c.merchant)
+        c.type === t.type && Number(c.amount) === t.amount &&
+        (near(c.occurred_at, t.occurred_at, MIN15) || (near(c.occurred_at, t.occurred_at, 1.5) && sameMerchant(c.merchant)))
       );
-      if (dup) { skipped++; continue; }
+      if (dup) {
+        // aproveita o nome mais legível (a Carteira costuma trazer o nome "bonito" da loja)
+        if (!dup.merchant && t.merchant) await db.from("transactions").update({ merchant: t.merchant }).eq("id", dup.id).eq("user_id", userId);
+        skipped++; continue;
+      }
     }
 
     const { category_id, reimbursable } = categorize(t);

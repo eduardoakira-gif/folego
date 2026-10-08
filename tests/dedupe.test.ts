@@ -72,4 +72,12 @@ await ingestBatch(db, "u", [{ source: "notification", type: "expense", amount: 5
 r = await ingestBatch(db, "u", [{ source: "open_finance", type: "transfer", amount: 500, description: "PIX ENVIADO EDUARDO", occurred_at: now, external_id: "pl_10" }]);
 const pix = tables.transactions.filter((t) => Number(t.amount) === 500);
 assert(r.merged === 1 && pix.length === 1 && pix[0].type === "transfer" && pix[0].category_id === null, "Pix entre contas próprias não fica como gasto");
+// 11. Mesma compra avisada pela Carteira do Google e pelo app do Santander, com nomes diferentes
+const n0 = tables.transactions.length;
+await ingestBatch(db, "u", [{ source: "notification", type: "expense", amount: 87.3, merchant: "iFood", description: "iFood", occurred_at: "2026-10-07T23:00:00.000Z" }]);
+r = await ingestBatch(db, "u", [{ source: "notification", type: "expense", amount: 87.3, merchant: "IFD*RESTAURANTE XYZ", description: "IFD", occurred_at: "2026-10-07T23:01:30.000Z" }]);
+assert(r.skipped === 1 && tables.transactions.length === n0 + 1, "Carteira + app do banco = um lançamento só");
+// 12. Duas compras de mesmo valor com 3 horas de diferença em lugares diferentes continuam duas
+r = await ingestBatch(db, "u", [{ source: "notification", type: "expense", amount: 87.3, merchant: "Posto Shell", description: "Posto", occurred_at: "2026-10-08T02:00:00.000Z" }]);
+assert(r.inserted === 1, "compra igual em outro horário e outro lugar não é descartada");
 console.log("\nTodos os testes de deduplicação passaram.");

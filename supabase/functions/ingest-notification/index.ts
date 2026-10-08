@@ -3,7 +3,7 @@
 //   iPhone:  Atalhos → automação "Transação" (Carteira) → { app:"Wallet", merchant, amount, card }
 // Autenticação: header X-Ingest-Token (token pessoal exibido no app; pode ser renovado).
 import { admin, handler, HttpError, json } from "../_shared/supabase.ts";
-import { parseBankNotification, parseBRL } from "../_shared/parse.ts";
+import { parseBankNotification, parseBRL, parseWalletNotification } from "../_shared/parse.ts";
 import { checkBudgetAlerts, ingestBatch } from "../_shared/store.ts";
 
 Deno.serve(handler(async (req) => {
@@ -26,7 +26,7 @@ Deno.serve(handler(async (req) => {
     const amount = typeof body.amount === "number" ? body.amount : parseBRL(`R$ ${body.amount}`);
     if (amount) parsed = { type: "expense" as const, amount, merchant: String(body.merchant).slice(0, 80), installment: null };
   } else {
-    parsed = parseBankNotification(title, text);
+    parsed = parseWalletNotification(app, title, text) ?? parseBankNotification(title, text);
   }
 
   const log = (result: string, transaction_id: string | null = null) =>
